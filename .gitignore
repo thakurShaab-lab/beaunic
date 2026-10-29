@@ -1,0 +1,38 @@
+# Dependencies
+node_modules/
+
+# Environment variables and secrets
+# .env
+!.env.example
+
+# Uploaded files (salon logos)
+uploads/
+
+# Build output
+dist/
+build/
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE settings
+.vscode/
+.idea/
+
+# Python
+__pycache__/
+*.py[cod]
+venv/
+
+# Java
+*.class
+target/
+
+# Temporary files
+*.tmp
+*.swp

@@ -1,0 +1,4105 @@
+{
+  "id": "00000000-0000-0000-0000-000000000000",
+  "prevId": "",
+  "version": "5",
+  "dialect": "mysql",
+  "tables": {
+    "subadmin_activity_record": {
+      "name": "subadmin_activity_record",
+      "columns": {
+        "activity_id": {
+          "autoincrement": false,
+          "name": "activity_id",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "subadmin_id": {
+          "autoincrement": false,
+          "name": "subadmin_id",
+          "type": "varchar(50)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "subadmin_name": {
+          "autoincrement": false,
+          "name": "subadmin_name",
+          "type": "varchar(255)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "section": {
+          "autoincrement": false,
+          "name": "section",
+          "type": "varchar(255)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "action": {
+          "autoincrement": false,
+          "name": "action",
+          "type": "tinytext",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "matter_id": {
+          "autoincrement": false,
+          "name": "matter_id",
+          "type": "varchar(255)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "matter_name": {
+          "autoincrement": false,
+          "name": "matter_name",
+          "type": "varchar(255)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "added_date": {
+          "autoincrement": false,
+          "name": "added_date",
+          "type": "datetime",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "compositePrimaryKeys": {},
+      "indexes": {},
+      "foreignKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraint": {}
+    },
+    "tbl_admin": {
+      "name": "tbl_admin",
+      "columns": {
+        "admin_id": {
+          "autoincrement": true,
+          "name": "admin_id",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "admin_type": {
+          "default": "'2'",
+          "autoincrement": false,
+          "name": "admin_type",
+          "type": "enum('1','2','3')",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "admin_key": {
+          "autoincrement": false,
+          "name": "admin_key",
+          "type": "varchar(15)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "admin_name": {
+          "autoincrement": false,
+          "name": "admin_name",
+          "type": "varchar(450)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "admin_username": {
+          "autoincrement": false,
+          "name": "admin_username",
+          "type": "varchar(50)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "admin_password": {
+          "autoincrement": false,
+          "name": "admin_password",
+          "type": "varchar(80)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "admin_email": {
+          "autoincrement": false,
+          "name": "admin_email",
+          "type": "varchar(255)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "litigation_days": {
+          "autoincrement": false,
+          "name": "litigation_days",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "admin_last_login": {
+          "default": "'0000-00-00 00:00:00'",
+          "autoincrement": false,
+          "name": "admin_last_login",
+          "type": "datetime",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "address": {
+          "autoincrement": false,
+          "name": "address",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "corporate_address": {
+          "autoincrement": false,
+          "name": "corporate_address",
+          "type": "varchar(255)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "city": {
+          "autoincrement": false,
+          "name": "city",
+          "type": "varchar(100)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "state": {
+          "autoincrement": false,
+          "name": "state",
+          "type": "varchar(100)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "country": {
+          "autoincrement": false,
+          "name": "country",
+          "type": "varchar(100)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "zipcode": {
+          "autoincrement": false,
+          "name": "zipcode",
+          "type": "varchar(50)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "phone": {
+          "autoincrement": false,
+          "name": "phone",
+          "type": "varchar(50)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "mobile": {
+          "autoincrement": false,
+          "name": "mobile",
+          "type": "varchar(50)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "fax": {
+          "autoincrement": false,
+          "name": "fax",
+          "type": "varchar(50)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "contact_person": {
+          "autoincrement": false,
+          "name": "contact_person",
+          "type": "varchar(50)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "contact_phone": {
+          "autoincrement": false,
+          "name": "contact_phone",
+          "type": "varchar(50)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "contact_email": {
+          "autoincrement": false,
+          "name": "contact_email",
+          "type": "varchar(50)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "status": {
+          "default": "'1'",
+          "autoincrement": false,
+          "name": "status",
+          "type": "enum('0','1','2')",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "total_hits": {
+          "default": 0,
+          "autoincrement": false,
+          "name": "total_hits",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "facebook_link": {
+          "autoincrement": false,
+          "name": "facebook_link",
+          "type": "varchar(250)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "twitter_link": {
+          "autoincrement": false,
+          "name": "twitter_link",
+          "type": "varchar(250)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "linkedin_link": {
+          "autoincrement": false,
+          "name": "linkedin_link",
+          "type": "varchar(250)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "instagram_link": {
+          "autoincrement": false,
+          "name": "instagram_link",
+          "type": "varchar(250)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "youtube_link": {
+          "autoincrement": false,
+          "name": "youtube_link",
+          "type": "varchar(250)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "google_analytics_id": {
+          "autoincrement": false,
+          "name": "google_analytics_id",
+          "type": "varchar(50)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "google_web_code": {
+          "autoincrement": false,
+          "name": "google_web_code",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "website": {
+          "autoincrement": false,
+          "name": "website",
+          "type": "varchar(255)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "whatsapp_number": {
+          "autoincrement": false,
+          "name": "whatsapp_number",
+          "type": "varchar(20)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "whatsapp_message": {
+          "autoincrement": false,
+          "name": "whatsapp_message",
+          "type": "varchar(20)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "post_date": {
+          "autoincrement": false,
+          "name": "post_date",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "compositePrimaryKeys": {
+        "tbl_admin_admin_id": {
+          "name": "tbl_admin_admin_id",
+          "columns": [
+            "admin_id"
+          ]
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraint": {}
+    },
+    "tbl_admin_allowed_sections": {
+      "name": "tbl_admin_allowed_sections",
+      "columns": {
+        "id": {
+          "autoincrement": true,
+          "name": "id",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "subadmin_id": {
+          "autoincrement": false,
+          "name": "subadmin_id",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "sec_parent_id": {
+          "autoincrement": false,
+          "name": "sec_parent_id",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "sec_id": {
+          "autoincrement": false,
+          "name": "sec_id",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "permission": {
+          "default": "'1'",
+          "autoincrement": false,
+          "name": "permission",
+          "type": "varchar(25)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "allow_category_ids": {
+          "autoincrement": false,
+          "name": "allow_category_ids",
+          "type": "varchar(255)",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "compositePrimaryKeys": {
+        "tbl_admin_allowed_sections_id": {
+          "name": "tbl_admin_allowed_sections_id",
+          "columns": [
+            "id"
+          ]
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraint": {}
+    },
+    "tbl_admin_sections": {
+      "name": "tbl_admin_sections",
+      "columns": {
+        "id": {
+          "autoincrement": true,
+          "name": "id",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "parent_id": {
+          "default": 0,
+          "autoincrement": false,
+          "name": "parent_id",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "section_title": {
+          "autoincrement": false,
+          "name": "section_title",
+          "type": "varchar(100)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "section_controller": {
+          "autoincrement": false,
+          "name": "section_controller",
+          "type": "varchar(100)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "disp_order": {
+          "default": 0,
+          "autoincrement": false,
+          "name": "disp_order",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "actual_privilege": {
+          "autoincrement": false,
+          "name": "actual_privilege",
+          "type": "varchar(80)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "status": {
+          "default": "'1'",
+          "autoincrement": false,
+          "name": "status",
+          "type": "char(1)",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "compositePrimaryKeys": {
+        "tbl_admin_sections_id": {
+          "name": "tbl_admin_sections_id",
+          "columns": [
+            "id"
+          ]
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraint": {}
+    },
+    "wl_auto_respond_mails": {
+      "name": "wl_auto_respond_mails",
+      "columns": {
+        "id": {
+          "autoincrement": true,
+          "name": "id",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "email_section": {
+          "autoincrement": false,
+          "name": "email_section",
+          "type": "varchar(80)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "email_subject": {
+          "autoincrement": false,
+          "name": "email_subject",
+          "type": "varchar(200)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "email_content": {
+          "autoincrement": false,
+          "name": "email_content",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "default": "'1'",
+          "autoincrement": false,
+          "name": "status",
+          "type": "enum('0','1','2')",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "updated_on": {
+          "autoincrement": false,
+          "name": "updated_on",
+          "type": "datetime",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "compositePrimaryKeys": {
+        "wl_auto_respond_mails_id": {
+          "name": "wl_auto_respond_mails_id",
+          "columns": [
+            "id"
+          ]
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraint": {}
+    },
+    "wl_banners": {
+      "name": "wl_banners",
+      "columns": {
+        "banner_id": {
+          "autoincrement": true,
+          "name": "banner_id",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "banner_position": {
+          "autoincrement": false,
+          "name": "banner_position",
+          "type": "varchar(100)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "banner_image": {
+          "autoincrement": false,
+          "name": "banner_image",
+          "type": "varchar(200)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "banner_url": {
+          "autoincrement": false,
+          "name": "banner_url",
+          "type": "varchar(170)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "banner_page": {
+          "autoincrement": false,
+          "name": "banner_page",
+          "type": "varchar(30)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "status": {
+          "default": "'1'",
+          "autoincrement": false,
+          "name": "status",
+          "type": "enum('1','0')",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "clicks": {
+          "default": 0,
+          "autoincrement": false,
+          "name": "clicks",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "banner_added_date": {
+          "autoincrement": false,
+          "name": "banner_added_date",
+          "type": "datetime",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "banner_start_date": {
+          "autoincrement": false,
+          "name": "banner_start_date",
+          "type": "datetime",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "banner_end_date": {
+          "autoincrement": false,
+          "name": "banner_end_date",
+          "type": "datetime",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "compositePrimaryKeys": {
+        "wl_banners_banner_id": {
+          "name": "wl_banners_banner_id",
+          "columns": [
+            "banner_id"
+          ]
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraint": {}
+    },
+    "wl_categories": {
+      "name": "wl_categories",
+      "columns": {
+        "category_id": {
+          "autoincrement": true,
+          "name": "category_id",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "category_name": {
+          "autoincrement": false,
+          "name": "category_name",
+          "type": "varchar(100)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "category_links": {
+          "autoincrement": false,
+          "name": "category_links",
+          "type": "varchar(255)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "friendly_url": {
+          "autoincrement": false,
+          "name": "friendly_url",
+          "type": "varchar(100)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "category_image": {
+          "autoincrement": false,
+          "name": "category_image",
+          "type": "varchar(255)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "category_description": {
+          "autoincrement": false,
+          "name": "category_description",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "parent_id": {
+          "default": 0,
+          "autoincrement": false,
+          "name": "parent_id",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "is_home": {
+          "default": "'0'",
+          "autoincrement": false,
+          "name": "is_home",
+          "type": "enum('1','0')",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "is_footer": {
+          "default": "'0'",
+          "autoincrement": false,
+          "name": "is_footer",
+          "type": "enum('0','1')",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "is_fixed": {
+          "default": "'0'",
+          "autoincrement": false,
+          "name": "is_fixed",
+          "type": "enum('1','0')",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "sort_order": {
+          "autoincrement": false,
+          "name": "sort_order",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "date_added": {
+          "default": "'0000-00-00 00:00:00'",
+          "autoincrement": false,
+          "name": "date_added",
+          "type": "datetime",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "date_modified": {
+          "default": "'0000-00-00 00:00:00'",
+          "autoincrement": false,
+          "name": "date_modified",
+          "type": "datetime",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "default": "'1'",
+          "autoincrement": false,
+          "name": "status",
+          "type": "enum('0','1','2')",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "meta_title": {
+          "autoincrement": false,
+          "name": "meta_title",
+          "type": "varchar(100)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "meta_keywords": {
+          "autoincrement": false,
+          "name": "meta_keywords",
+          "type": "varchar(100)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "meta_description": {
+          "autoincrement": false,
+          "name": "meta_description",
+          "type": "varchar(225)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "category_alt": {
+          "autoincrement": false,
+          "name": "category_alt",
+          "type": "varchar(200)",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "compositePrimaryKeys": {
+        "wl_categories_category_id": {
+          "name": "wl_categories_category_id",
+          "columns": [
+            "category_id"
+          ]
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraint": {}
+    },
+    "wl_centers": {
+      "name": "wl_centers",
+      "columns": {
+        "center_id": {
+          "autoincrement": true,
+          "name": "center_id",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "center_name": {
+          "autoincrement": false,
+          "name": "center_name",
+          "type": "varchar(90)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "center_code": {
+          "autoincrement": false,
+          "name": "center_code",
+          "type": "varchar(20)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "friendly_url": {
+          "autoincrement": false,
+          "name": "friendly_url",
+          "type": "varchar(100)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "email": {
+          "autoincrement": false,
+          "name": "email",
+          "type": "varchar(80)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "password": {
+          "autoincrement": false,
+          "name": "password",
+          "type": "varchar(80)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "yoe": {
+          "autoincrement": false,
+          "name": "yoe",
+          "type": "varchar(4)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "phone_number": {
+          "autoincrement": false,
+          "name": "phone_number",
+          "type": "varchar(20)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "address": {
+          "autoincrement": false,
+          "name": "address",
+          "type": "varchar(255)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "center_image": {
+          "autoincrement": false,
+          "name": "center_image",
+          "type": "varchar(50)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "city_id": {
+          "default": 0,
+          "autoincrement": false,
+          "name": "city_id",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "location_id": {
+          "default": 0,
+          "autoincrement": false,
+          "name": "location_id",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "center_description": {
+          "autoincrement": false,
+          "name": "center_description",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "sort_order": {
+          "autoincrement": false,
+          "name": "sort_order",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "status": {
+          "default": "'1'",
+          "autoincrement": false,
+          "name": "status",
+          "type": "enum('1','0')",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "center_date_added": {
+          "default": "'0000-00-00 00:00:00'",
+          "autoincrement": false,
+          "name": "center_date_added",
+          "type": "datetime",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "center_date_updated": {
+          "default": "'0000-00-00 00:00:00'",
+          "autoincrement": false,
+          "name": "center_date_updated",
+          "type": "datetime",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "current_login": {
+          "default": "'0000-00-00 00:00:00'",
+          "autoincrement": false,
+          "name": "current_login",
+          "type": "datetime",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "last_login_date": {
+          "default": "'0000-00-00 00:00:00'",
+          "autoincrement": false,
+          "name": "last_login_date",
+          "type": "datetime",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "compositePrimaryKeys": {
+        "wl_centers_center_id": {
+          "name": "wl_centers_center_id",
+          "columns": [
+            "center_id"
+          ]
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraint": {}
+    },
+    "wl_cities": {
+      "name": "wl_cities",
+      "columns": {
+        "city_id": {
+          "autoincrement": true,
+          "name": "city_id",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "country_id": {
+          "default": 0,
+          "autoincrement": false,
+          "name": "country_id",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "title": {
+          "autoincrement": false,
+          "name": "title",
+          "type": "varchar(80)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "default": "'0000-00-00 00:00:00'",
+          "autoincrement": false,
+          "name": "created_at",
+          "type": "datetime",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_by": {
+          "default": 1,
+          "autoincrement": false,
+          "name": "created_by",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "default": "'1'",
+          "autoincrement": false,
+          "name": "status",
+          "type": "char(1)",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "compositePrimaryKeys": {
+        "wl_cities_city_id": {
+          "name": "wl_cities_city_id",
+          "columns": [
+            "city_id"
+          ]
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraint": {}
+    },
+    "wl_cms_pages": {
+      "name": "wl_cms_pages",
+      "columns": {
+        "page_id": {
+          "autoincrement": true,
+          "name": "page_id",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "parent_id": {
+          "default": 0,
+          "autoincrement": false,
+          "name": "parent_id",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "page_name": {
+          "default": "''",
+          "autoincrement": false,
+          "name": "page_name",
+          "type": "varchar(50)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "friendly_url": {
+          "autoincrement": false,
+          "name": "friendly_url",
+          "type": "varchar(50)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "page_description": {
+          "autoincrement": false,
+          "name": "page_description",
+          "type": "longtext",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "page_short_description": {
+          "autoincrement": false,
+          "name": "page_short_description",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "image": {
+          "autoincrement": false,
+          "name": "image",
+          "type": "varchar(50)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "default": "'1'",
+          "autoincrement": false,
+          "name": "status",
+          "type": "enum('0','1','2')",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "page_updated_date": {
+          "autoincrement": false,
+          "name": "page_updated_date",
+          "type": "datetime",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "compositePrimaryKeys": {
+        "wl_cms_pages_page_id": {
+          "name": "wl_cms_pages_page_id",
+          "columns": [
+            "page_id"
+          ]
+        }
+      },
+      "indexes": {
+        "friendly_url": {
+          "name": "friendly_url",
+          "columns": [
+            "friendly_url"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraint": {}
+    },
+    "wl_countries": {
+      "name": "wl_countries",
+      "columns": {
+        "id": {
+          "autoincrement": true,
+          "name": "id",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "country_name": {
+          "autoincrement": false,
+          "name": "country_name",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "country_temp_name": {
+          "autoincrement": false,
+          "name": "country_temp_name",
+          "type": "varchar(250)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "country_iso_code_2": {
+          "autoincrement": false,
+          "name": "country_iso_code_2",
+          "type": "char(2)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "country_iso_code_3": {
+          "autoincrement": false,
+          "name": "country_iso_code_3",
+          "type": "char(3)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "country_flag": {
+          "autoincrement": false,
+          "name": "country_flag",
+          "type": "varchar(80)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_by": {
+          "default": 1,
+          "autoincrement": false,
+          "name": "created_by",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "default": "'1'",
+          "autoincrement": false,
+          "name": "status",
+          "type": "char(1)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "TimeZone": {
+          "autoincrement": false,
+          "name": "TimeZone",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "UTC_offset": {
+          "autoincrement": false,
+          "name": "UTC_offset",
+          "type": "varchar(8)",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "compositePrimaryKeys": {
+        "wl_countries_id": {
+          "name": "wl_countries_id",
+          "columns": [
+            "id"
+          ]
+        }
+      },
+      "indexes": {
+        "IDX_COUNTRIES_NAME": {
+          "name": "IDX_COUNTRIES_NAME",
+          "columns": [
+            "country_name"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraint": {}
+    },
+    "wl_coupon_customers": {
+      "name": "wl_coupon_customers",
+      "columns": {
+        "id": {
+          "autoincrement": true,
+          "name": "id",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "customer_id": {
+          "autoincrement": false,
+          "name": "customer_id",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "name": {
+          "autoincrement": false,
+          "name": "name",
+          "type": "varchar(150)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "email": {
+          "autoincrement": false,
+          "name": "email",
+          "type": "varchar(80)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "description": {
+          "autoincrement": false,
+          "name": "description",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "coupon_id": {
+          "autoincrement": false,
+          "name": "coupon_id",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "used_count": {
+          "default": 0,
+          "autoincrement": false,
+          "name": "used_count",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "default": "'0'",
+          "autoincrement": false,
+          "name": "status",
+          "type": "enum('0','1','2')",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "receive_on": {
+          "autoincrement": false,
+          "name": "receive_on",
+          "type": "datetime",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "compositePrimaryKeys": {
+        "wl_coupon_customers_id": {
+          "name": "wl_coupon_customers_id",
+          "columns": [
+            "id"
+          ]
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraint": {}
+    },
+    "wl_coupons": {
+      "name": "wl_coupons",
+      "columns": {
+        "coupon_id": {
+          "autoincrement": true,
+          "name": "coupon_id",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "coupon_title": {
+          "autoincrement": false,
+          "name": "coupon_title",
+          "type": "varchar(200)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "coupon_code": {
+          "autoincrement": false,
+          "name": "coupon_code",
+          "type": "varchar(10)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "coupon_type": {
+          "default": "'p'",
+          "autoincrement": false,
+          "name": "coupon_type",
+          "type": "enum('p','f','a')",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "coupon_usage": {
+          "default": "'single'",
+          "autoincrement": false,
+          "name": "coupon_usage",
+          "type": "enum('multiple','single')",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "usage_count": {
+          "default": 1,
+          "autoincrement": false,
+          "name": "usage_count",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "coupon_for": {
+          "default": "'0'",
+          "autoincrement": false,
+          "name": "coupon_for",
+          "type": "enum('0','1')",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "coupon_discount": {
+          "default": "'0.00'",
+          "autoincrement": false,
+          "name": "coupon_discount",
+          "type": "decimal(10,2)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "maximum_coupon_discount": {
+          "default": 0,
+          "autoincrement": false,
+          "name": "maximum_coupon_discount",
+          "type": "float(10,2)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "minimum_order_amount": {
+          "default": "'0.00'",
+          "autoincrement": false,
+          "name": "minimum_order_amount",
+          "type": "decimal(10,2)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "start_date": {
+          "autoincrement": false,
+          "name": "start_date",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "end_date": {
+          "autoincrement": false,
+          "name": "end_date",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "status": {
+          "default": "'1'",
+          "autoincrement": false,
+          "name": "status",
+          "type": "enum('0','1','2')",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "date_added": {
+          "default": "'0000-00-00 00:00:00'",
+          "autoincrement": false,
+          "name": "date_added",
+          "type": "datetime",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "compositePrimaryKeys": {
+        "wl_coupons_coupon_id": {
+          "name": "wl_coupons_coupon_id",
+          "columns": [
+            "coupon_id"
+          ]
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraint": {}
+    },
+    "wl_course_categories": {
+      "name": "wl_course_categories",
+      "columns": {
+        "category_id": {
+          "autoincrement": true,
+          "name": "category_id",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "category_name": {
+          "autoincrement": false,
+          "name": "category_name",
+          "type": "varchar(100)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "category_links": {
+          "autoincrement": false,
+          "name": "category_links",
+          "type": "varchar(255)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "friendly_url": {
+          "autoincrement": false,
+          "name": "friendly_url",
+          "type": "varchar(100)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "category_image": {
+          "autoincrement": false,
+          "name": "category_image",
+          "type": "varchar(255)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "category_description": {
+          "autoincrement": false,
+          "name": "category_description",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "parent_id": {
+          "default": 0,
+          "autoincrement": false,
+          "name": "parent_id",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "is_home": {
+          "default": "'0'",
+          "autoincrement": false,
+          "name": "is_home",
+          "type": "enum('1','0')",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "is_footer": {
+          "default": "'0'",
+          "autoincrement": false,
+          "name": "is_footer",
+          "type": "enum('0','1')",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "is_fixed": {
+          "default": "'0'",
+          "autoincrement": false,
+          "name": "is_fixed",
+          "type": "enum('1','0')",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "sort_order": {
+          "autoincrement": false,
+          "name": "sort_order",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "date_added": {
+          "default": "'0000-00-00 00:00:00'",
+          "autoincrement": false,
+          "name": "date_added",
+          "type": "datetime",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "date_modified": {
+          "default": "'0000-00-00 00:00:00'",
+          "autoincrement": false,
+          "name": "date_modified",
+          "type": "datetime",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "default": "'1'",
+          "autoincrement": false,
+          "name": "status",
+          "type": "enum('0','1','2')",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "meta_title": {
+          "autoincrement": false,
+          "name": "meta_title",
+          "type": "varchar(100)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "meta_keywords": {
+          "autoincrement": false,
+          "name": "meta_keywords",
+          "type": "varchar(100)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "meta_description": {
+          "autoincrement": false,
+          "name": "meta_description",
+          "type": "varchar(225)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "category_alt": {
+          "autoincrement": false,
+          "name": "category_alt",
+          "type": "varchar(200)",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "compositePrimaryKeys": {
+        "wl_course_categories_category_id": {
+          "name": "wl_course_categories_category_id",
+          "columns": [
+            "category_id"
+          ]
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraint": {}
+    },
+    "wl_courses": {
+      "name": "wl_courses",
+      "columns": {
+        "course_id": {
+          "autoincrement": true,
+          "name": "course_id",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "center_id": {
+          "default": 0,
+          "autoincrement": false,
+          "name": "center_id",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "category_id": {
+          "default": 0,
+          "autoincrement": false,
+          "name": "category_id",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "course_name": {
+          "autoincrement": false,
+          "name": "course_name",
+          "type": "varchar(200)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "friendly_url": {
+          "autoincrement": false,
+          "name": "friendly_url",
+          "type": "varchar(110)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "course_image": {
+          "autoincrement": false,
+          "name": "course_image",
+          "type": "varchar(80)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "course_brochure": {
+          "autoincrement": false,
+          "name": "course_brochure",
+          "type": "varchar(80)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "duration_id": {
+          "default": 0,
+          "autoincrement": false,
+          "name": "duration_id",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "course_fee": {
+          "default": 0,
+          "autoincrement": false,
+          "name": "course_fee",
+          "type": "float(15,2)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "course_description": {
+          "autoincrement": false,
+          "name": "course_description",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "course_curriculum": {
+          "autoincrement": false,
+          "name": "course_curriculum",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "is_featured": {
+          "default": "'0'",
+          "autoincrement": false,
+          "name": "is_featured",
+          "type": "enum('1','0')",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "default": "'1'",
+          "autoincrement": false,
+          "name": "status",
+          "type": "enum('0','1','2')",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "center_status": {
+          "default": 1,
+          "autoincrement": false,
+          "name": "center_status",
+          "type": "tinyint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "course_added_date": {
+          "default": "'0000-00-00 00:00:00'",
+          "autoincrement": false,
+          "name": "course_added_date",
+          "type": "datetime",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "course_updated_date": {
+          "default": "'0000-00-00 00:00:00'",
+          "autoincrement": false,
+          "name": "course_updated_date",
+          "type": "datetime",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "course_viewed": {
+          "default": 0,
+          "autoincrement": false,
+          "name": "course_viewed",
+          "type": "int unsigned",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "course_alt": {
+          "autoincrement": false,
+          "name": "course_alt",
+          "type": "varchar(100)",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "compositePrimaryKeys": {
+        "wl_courses_course_id": {
+          "name": "wl_courses_course_id",
+          "columns": [
+            "course_id"
+          ]
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraint": {}
+    },
+    "wl_currencies": {
+      "name": "wl_currencies",
+      "columns": {
+        "currency_id": {
+          "autoincrement": true,
+          "name": "currency_id",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "title": {
+          "default": "''",
+          "autoincrement": false,
+          "name": "title",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "code": {
+          "default": "''",
+          "autoincrement": false,
+          "name": "code",
+          "type": "varchar(3)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "symbol_left": {
+          "autoincrement": false,
+          "name": "symbol_left",
+          "type": "varchar(12)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "symbol_right": {
+          "autoincrement": false,
+          "name": "symbol_right",
+          "type": "varchar(12)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "curr_image": {
+          "autoincrement": false,
+          "name": "curr_image",
+          "type": "varchar(250)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "decimal_place": {
+          "autoincrement": false,
+          "name": "decimal_place",
+          "type": "char(1)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "value": {
+          "autoincrement": false,
+          "name": "value",
+          "type": "float(15,8)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "is_default": {
+          "default": "'N'",
+          "autoincrement": false,
+          "name": "is_default",
+          "type": "enum('Y','N')",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "autoincrement": false,
+          "name": "status",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "date_modified": {
+          "default": "'0000-00-00 00:00:00'",
+          "autoincrement": false,
+          "name": "date_modified",
+          "type": "datetime",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "compositePrimaryKeys": {
+        "wl_currencies_currency_id": {
+          "name": "wl_currencies_currency_id",
+          "columns": [
+            "currency_id"
+          ]
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraint": {}
+    },
+    "wl_customers": {
+      "name": "wl_customers",
+      "columns": {
+        "customer_id": {
+          "autoincrement": true,
+          "name": "customer_id",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "user_name": {
+          "autoincrement": false,
+          "name": "user_name",
+          "type": "varchar(80)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "password": {
+          "autoincrement": false,
+          "name": "password",
+          "type": "varchar(100)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "title": {
+          "autoincrement": false,
+          "name": "title",
+          "type": "varchar(10)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "first_name": {
+          "autoincrement": false,
+          "name": "first_name",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "last_name": {
+          "autoincrement": false,
+          "name": "last_name",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "gender": {
+          "default": "'Male'",
+          "autoincrement": false,
+          "name": "gender",
+          "type": "enum('Male','Female')",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "birth_date": {
+          "autoincrement": false,
+          "name": "birth_date",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "customer_photo": {
+          "autoincrement": false,
+          "name": "customer_photo",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "phone_number": {
+          "autoincrement": false,
+          "name": "phone_number",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "mobile_number": {
+          "autoincrement": false,
+          "name": "mobile_number",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "fax_number": {
+          "autoincrement": false,
+          "name": "fax_number",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "actkey": {
+          "autoincrement": false,
+          "name": "actkey",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "default": "'0'",
+          "autoincrement": false,
+          "name": "status",
+          "type": "enum('0','1','2','3')",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "is_verified": {
+          "default": "'0'",
+          "autoincrement": false,
+          "name": "is_verified",
+          "type": "enum('0','1')",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "is_verified_mobile": {
+          "default": "'0'",
+          "autoincrement": false,
+          "name": "is_verified_mobile",
+          "type": "enum('0','1')",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "login_type": {
+          "default": "'normal'",
+          "autoincrement": false,
+          "name": "login_type",
+          "type": "enum('normal','facebook','twitter','salon_partner','salon_user')",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "account_created_date": {
+          "autoincrement": false,
+          "name": "account_created_date",
+          "type": "datetime",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "current_login": {
+          "autoincrement": false,
+          "name": "current_login",
+          "type": "datetime",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "last_login_date": {
+          "autoincrement": false,
+          "name": "last_login_date",
+          "type": "datetime",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "ip_address": {
+          "autoincrement": false,
+          "name": "ip_address",
+          "type": "varchar(25)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "is_blocked": {
+          "default": "'0'",
+          "autoincrement": false,
+          "name": "is_blocked",
+          "type": "enum('0','1')",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "block_time": {
+          "default": "'0000-00-00 00:00:00'",
+          "autoincrement": false,
+          "name": "block_time",
+          "type": "datetime",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "number_of_login_try": {
+          "default": 0,
+          "autoincrement": false,
+          "name": "number_of_login_try",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "replied": {
+          "default": "'N'",
+          "autoincrement": false,
+          "name": "replied",
+          "type": "enum('Y','N')",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "service_type": {
+          "autoincrement": false,
+          "name": "service_type",
+          "type": "enum('1','2')",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "customer_type": {
+          "autoincrement": false,
+          "name": "customer_type",
+          "type": "enum('1','2')",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "compositePrimaryKeys": {
+        "wl_customers_customer_id": {
+          "name": "wl_customers_customer_id",
+          "columns": [
+            "customer_id"
+          ]
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraint": {}
+    },
+    "wl_customers_address_book": {
+      "name": "wl_customers_address_book",
+      "columns": {
+        "address_id": {
+          "autoincrement": true,
+          "name": "address_id",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "customer_id": {
+          "autoincrement": false,
+          "name": "customer_id",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "first_name": {
+          "autoincrement": false,
+          "name": "first_name",
+          "type": "varchar(40)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "last_name": {
+          "autoincrement": false,
+          "name": "last_name",
+          "type": "varchar(40)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "name": {
+          "autoincrement": false,
+          "name": "name",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "address": {
+          "autoincrement": false,
+          "name": "address",
+          "type": "varchar(200)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "mobile": {
+          "autoincrement": false,
+          "name": "mobile",
+          "type": "varchar(25)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "zipcode": {
+          "autoincrement": false,
+          "name": "zipcode",
+          "type": "varchar(25)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "phone": {
+          "autoincrement": false,
+          "name": "phone",
+          "type": "varchar(25)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "fax": {
+          "autoincrement": false,
+          "name": "fax",
+          "type": "varchar(50)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "landmark": {
+          "autoincrement": false,
+          "name": "landmark",
+          "type": "varchar(150)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "city": {
+          "autoincrement": false,
+          "name": "city",
+          "type": "varchar(50)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "state": {
+          "autoincrement": false,
+          "name": "state",
+          "type": "varchar(50)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "country": {
+          "autoincrement": false,
+          "name": "country",
+          "type": "varchar(80)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "reciv_date": {
+          "autoincrement": false,
+          "name": "reciv_date",
+          "type": "datetime",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "address_type": {
+          "autoincrement": false,
+          "name": "address_type",
+          "type": "enum('Bill','Ship')",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "default_status": {
+          "default": "'N'",
+          "autoincrement": false,
+          "name": "default_status",
+          "type": "enum('Y','N')",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "compositePrimaryKeys": {
+        "wl_customers_address_book_address_id": {
+          "name": "wl_customers_address_book_address_id",
+          "columns": [
+            "address_id"
+          ]
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraint": {}
+    },
+    "wl_durations": {
+      "name": "wl_durations",
+      "columns": {
+        "duration_id": {
+          "autoincrement": true,
+          "name": "duration_id",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "duration_name": {
+          "default": "''",
+          "autoincrement": false,
+          "name": "duration_name",
+          "type": "varchar(80)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "duration_date_added": {
+          "default": "'0000-00-00 00:00:00'",
+          "autoincrement": false,
+          "name": "duration_date_added",
+          "type": "datetime",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "duration_date_updated": {
+          "default": "'0000-00-00 00:00:00'",
+          "autoincrement": false,
+          "name": "duration_date_updated",
+          "type": "datetime",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "sort_order": {
+          "autoincrement": false,
+          "name": "sort_order",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "status": {
+          "default": "'1'",
+          "autoincrement": false,
+          "name": "status",
+          "type": "enum('0','1','2')",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "compositePrimaryKeys": {
+        "wl_durations_duration_id": {
+          "name": "wl_durations_duration_id",
+          "columns": [
+            "duration_id"
+          ]
+        }
+      },
+      "indexes": {
+        "idx_mfg_name_zen": {
+          "name": "idx_mfg_name_zen",
+          "columns": [
+            "duration_name"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraint": {}
+    },
+    "wl_enquiries": {
+      "name": "wl_enquiries",
+      "columns": {
+        "id": {
+          "autoincrement": true,
+          "name": "id",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "type": {
+          "default": "'1'",
+          "autoincrement": false,
+          "name": "type",
+          "type": "enum('1','2','3')",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "entity_name": {
+          "autoincrement": false,
+          "name": "entity_name",
+          "type": "varchar(255)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "entity_id": {
+          "default": 0,
+          "autoincrement": false,
+          "name": "entity_id",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "center_id": {
+          "default": 0,
+          "autoincrement": false,
+          "name": "center_id",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "email": {
+          "autoincrement": false,
+          "name": "email",
+          "type": "varchar(80)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "first_name": {
+          "autoincrement": false,
+          "name": "first_name",
+          "type": "varchar(30)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "last_name": {
+          "autoincrement": false,
+          "name": "last_name",
+          "type": "varchar(30)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "company_name": {
+          "autoincrement": false,
+          "name": "company_name",
+          "type": "varchar(60)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "country": {
+          "autoincrement": false,
+          "name": "country",
+          "type": "varchar(200)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "state": {
+          "autoincrement": false,
+          "name": "state",
+          "type": "varchar(50)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "city": {
+          "autoincrement": false,
+          "name": "city",
+          "type": "varchar(50)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "phone_number": {
+          "autoincrement": false,
+          "name": "phone_number",
+          "type": "varchar(20)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "ext_number": {
+          "autoincrement": false,
+          "name": "ext_number",
+          "type": "varchar(50)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "mobile_number": {
+          "autoincrement": false,
+          "name": "mobile_number",
+          "type": "varchar(20)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "fax_number": {
+          "autoincrement": false,
+          "name": "fax_number",
+          "type": "varchar(30)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "address": {
+          "autoincrement": false,
+          "name": "address",
+          "type": "varchar(220)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "zipcode": {
+          "autoincrement": false,
+          "name": "zipcode",
+          "type": "varchar(10)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "requirement": {
+          "autoincrement": false,
+          "name": "requirement",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "message": {
+          "autoincrement": false,
+          "name": "message",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "autoincrement": false,
+          "name": "status",
+          "type": "enum('1','2')",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "reply_status": {
+          "default": "'N'",
+          "autoincrement": false,
+          "name": "reply_status",
+          "type": "enum('Y','N')",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "receive_date": {
+          "autoincrement": false,
+          "name": "receive_date",
+          "type": "datetime",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "job_title": {
+          "autoincrement": false,
+          "name": "job_title",
+          "type": "varchar(50)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "inquiry_type": {
+          "autoincrement": false,
+          "name": "inquiry_type",
+          "type": "varchar(80)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "resume": {
+          "autoincrement": false,
+          "name": "resume",
+          "type": "varchar(100)",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "compositePrimaryKeys": {
+        "wl_enquiries_id": {
+          "name": "wl_enquiries_id",
+          "columns": [
+            "id"
+          ]
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraint": {}
+    },
+    "wl_faq": {
+      "name": "wl_faq",
+      "columns": {
+        "faq_id": {
+          "autoincrement": true,
+          "name": "faq_id",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "faq_parent_id": {
+          "default": 0,
+          "autoincrement": false,
+          "name": "faq_parent_id",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "faq_question": {
+          "autoincrement": false,
+          "name": "faq_question",
+          "type": "varchar(225)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "faq_answer": {
+          "autoincrement": false,
+          "name": "faq_answer",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "sort_order": {
+          "autoincrement": false,
+          "name": "sort_order",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "status": {
+          "default": "'1'",
+          "autoincrement": false,
+          "name": "status",
+          "type": "enum('1','2','3')",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "faq_date_added": {
+          "autoincrement": false,
+          "name": "faq_date_added",
+          "type": "datetime",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "compositePrimaryKeys": {
+        "wl_faq_faq_id": {
+          "name": "wl_faq_faq_id",
+          "columns": [
+            "faq_id"
+          ]
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraint": {}
+    },
+    "wl_header_images": {
+      "name": "wl_header_images",
+      "columns": {
+        "id": {
+          "autoincrement": true,
+          "name": "id",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "header_image": {
+          "autoincrement": false,
+          "name": "header_image",
+          "type": "varchar(200)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "header_url": {
+          "autoincrement": false,
+          "name": "header_url",
+          "type": "varchar(255)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "line_one": {
+          "autoincrement": false,
+          "name": "line_one",
+          "type": "varchar(100)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "line_two": {
+          "autoincrement": false,
+          "name": "line_two",
+          "type": "varchar(150)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "status": {
+          "autoincrement": false,
+          "name": "status",
+          "type": "enum('1','0','2')",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "added_date": {
+          "autoincrement": false,
+          "name": "added_date",
+          "type": "datetime",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "compositePrimaryKeys": {
+        "wl_header_images_id": {
+          "name": "wl_header_images_id",
+          "columns": [
+            "id"
+          ]
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraint": {}
+    },
+    "wl_invite_friends": {
+      "name": "wl_invite_friends",
+      "columns": {
+        "invite_id": {
+          "autoincrement": false,
+          "name": "invite_id",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "friend_name": {
+          "autoincrement": false,
+          "name": "friend_name",
+          "type": "varchar(100)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "friend_email": {
+          "autoincrement": false,
+          "name": "friend_email",
+          "type": "varchar(100)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "your_name": {
+          "autoincrement": false,
+          "name": "your_name",
+          "type": "varchar(100)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "your_email": {
+          "autoincrement": false,
+          "name": "your_email",
+          "type": "varchar(100)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "receive_date": {
+          "autoincrement": false,
+          "name": "receive_date",
+          "type": "datetime",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "compositePrimaryKeys": {
+        "wl_invite_friends_invite_id": {
+          "name": "wl_invite_friends_invite_id",
+          "columns": [
+            "invite_id"
+          ]
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraint": {}
+    },
+    "wl_localities": {
+      "name": "wl_localities",
+      "columns": {
+        "location_id": {
+          "autoincrement": true,
+          "name": "location_id",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "city_id": {
+          "default": 0,
+          "autoincrement": false,
+          "name": "city_id",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "state_id": {
+          "default": 0,
+          "autoincrement": false,
+          "name": "state_id",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "country_id": {
+          "default": 0,
+          "autoincrement": false,
+          "name": "country_id",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "title": {
+          "autoincrement": false,
+          "name": "title",
+          "type": "varchar(80)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "default": "'0000-00-00 00:00:00'",
+          "autoincrement": false,
+          "name": "created_at",
+          "type": "datetime",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "default": "'1'",
+          "autoincrement": false,
+          "name": "status",
+          "type": "char(1)",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "compositePrimaryKeys": {
+        "wl_localities_location_id": {
+          "name": "wl_localities_location_id",
+          "columns": [
+            "location_id"
+          ]
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraint": {}
+    },
+    "wl_meta_tags": {
+      "name": "wl_meta_tags",
+      "columns": {
+        "meta_id": {
+          "autoincrement": true,
+          "name": "meta_id",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "is_fixed": {
+          "default": "'N'",
+          "autoincrement": false,
+          "name": "is_fixed",
+          "type": "enum('Y','N')",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "entity_type": {
+          "autoincrement": false,
+          "name": "entity_type",
+          "type": "varchar(80)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "entity_id": {
+          "default": 0,
+          "autoincrement": false,
+          "name": "entity_id",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "page_url": {
+          "autoincrement": false,
+          "name": "page_url",
+          "type": "varchar(200)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "meta_title": {
+          "autoincrement": false,
+          "name": "meta_title",
+          "type": "varchar(80)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "meta_description": {
+          "autoincrement": false,
+          "name": "meta_description",
+          "type": "varchar(220)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "meta_keyword": {
+          "autoincrement": false,
+          "name": "meta_keyword",
+          "type": "varchar(460)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "status": {
+          "default": "'1'",
+          "autoincrement": false,
+          "name": "status",
+          "type": "enum('0','1')",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "compositePrimaryKeys": {
+        "wl_meta_tags_meta_id": {
+          "name": "wl_meta_tags_meta_id",
+          "columns": [
+            "meta_id"
+          ]
+        }
+      },
+      "indexes": {
+        "entity_id": {
+          "name": "entity_id",
+          "columns": [
+            "entity_id"
+          ],
+          "isUnique": false
+        },
+        "entity_type": {
+          "name": "entity_type",
+          "columns": [
+            "entity_type"
+          ],
+          "isUnique": false
+        },
+        "page_url": {
+          "name": "page_url",
+          "columns": [
+            "page_url"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraint": {}
+    },
+    "wl_newsletter_group_subscriber": {
+      "name": "wl_newsletter_group_subscriber",
+      "columns": {
+        "group_subscriber_id": {
+          "autoincrement": false,
+          "name": "group_subscriber_id",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "newsletter_groups_id": {
+          "autoincrement": false,
+          "name": "newsletter_groups_id",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "subscriber_id": {
+          "autoincrement": false,
+          "name": "subscriber_id",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "date_added": {
+          "autoincrement": false,
+          "name": "date_added",
+          "type": "datetime",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "compositePrimaryKeys": {
+        "wl_newsletter_group_subscriber_group_subscriber_id": {
+          "name": "wl_newsletter_group_subscriber_group_subscriber_id",
+          "columns": [
+            "group_subscriber_id"
+          ]
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraint": {}
+    },
+    "wl_newsletter_groups": {
+      "name": "wl_newsletter_groups",
+      "columns": {
+        "newsletter_groups_id": {
+          "autoincrement": false,
+          "name": "newsletter_groups_id",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "group_name": {
+          "autoincrement": false,
+          "name": "group_name",
+          "type": "varchar(40)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "default": "'1'",
+          "autoincrement": false,
+          "name": "status",
+          "type": "enum('1','0')",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "groups_created_date": {
+          "autoincrement": false,
+          "name": "groups_created_date",
+          "type": "datetime",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "compositePrimaryKeys": {
+        "wl_newsletter_groups_newsletter_groups_id": {
+          "name": "wl_newsletter_groups_newsletter_groups_id",
+          "columns": [
+            "newsletter_groups_id"
+          ]
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraint": {}
+    },
+    "wl_newsletter_log": {
+      "name": "wl_newsletter_log",
+      "columns": {
+        "id": {
+          "autoincrement": false,
+          "name": "id",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "newsletter_data": {
+          "autoincrement": false,
+          "name": "newsletter_data",
+          "type": "longtext",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "posted_date": {
+          "default": "'0000-00-00 00:00:00'",
+          "autoincrement": false,
+          "name": "posted_date",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "compositePrimaryKeys": {
+        "wl_newsletter_log_id": {
+          "name": "wl_newsletter_log_id",
+          "columns": [
+            "id"
+          ]
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraint": {}
+    },
+    "wl_newsletters": {
+      "name": "wl_newsletters",
+      "columns": {
+        "subscriber_id": {
+          "autoincrement": true,
+          "name": "subscriber_id",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "subscriber_name": {
+          "autoincrement": false,
+          "name": "subscriber_name",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "subscriber_email": {
+          "autoincrement": false,
+          "name": "subscriber_email",
+          "type": "varchar(80)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "status": {
+          "default": "'1'",
+          "autoincrement": false,
+          "name": "status",
+          "type": "enum('0','1','2')",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "mail_status": {
+          "default": "'0'",
+          "autoincrement": false,
+          "name": "mail_status",
+          "type": "enum('1','0')",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "subscribe_date": {
+          "autoincrement": false,
+          "name": "subscribe_date",
+          "type": "datetime",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "mail_sent_date": {
+          "autoincrement": false,
+          "name": "mail_sent_date",
+          "type": "datetime",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "compositePrimaryKeys": {
+        "wl_newsletters_subscriber_id": {
+          "name": "wl_newsletters_subscriber_id",
+          "columns": [
+            "subscriber_id"
+          ]
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraint": {}
+    },
+    "wl_order_packages": {
+      "name": "wl_order_packages",
+      "columns": {
+        "order_item_id": {
+          "autoincrement": true,
+          "name": "order_item_id",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "order_id": {
+          "default": 0,
+          "autoincrement": false,
+          "name": "order_id",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "package_id": {
+          "autoincrement": false,
+          "name": "package_id",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "package_duration": {
+          "autoincrement": false,
+          "name": "package_duration",
+          "type": "varchar(70)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "package_name": {
+          "autoincrement": false,
+          "name": "package_name",
+          "type": "varchar(100)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "package_image": {
+          "autoincrement": false,
+          "name": "package_image",
+          "type": "longblob",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "package_price": {
+          "autoincrement": false,
+          "name": "package_price",
+          "type": "float(10,2)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "quantity": {
+          "default": 1,
+          "autoincrement": false,
+          "name": "quantity",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "coupon_code": {
+          "autoincrement": false,
+          "name": "coupon_code",
+          "type": "varchar(40)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "coupon_discount": {
+          "default": 0,
+          "autoincrement": false,
+          "name": "coupon_discount",
+          "type": "float(10,2)",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "compositePrimaryKeys": {
+        "wl_order_packages_order_item_id": {
+          "name": "wl_order_packages_order_item_id",
+          "columns": [
+            "order_item_id"
+          ]
+        }
+      },
+      "indexes": {
+        "order_id": {
+          "name": "order_id",
+          "columns": [
+            "order_item_id"
+          ],
+          "isUnique": false
+        },
+        "order_no": {
+          "name": "order_no",
+          "columns": [
+            "order_id"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraint": {}
+    },
+    "wl_orders": {
+      "name": "wl_orders",
+      "columns": {
+        "order_id": {
+          "autoincrement": true,
+          "name": "order_id",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "customer_id": {
+          "default": 0,
+          "autoincrement": false,
+          "name": "customer_id",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "customer_type": {
+          "default": "'Member'",
+          "autoincrement": false,
+          "name": "customer_type",
+          "type": "varchar(100)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "invoice_number": {
+          "autoincrement": false,
+          "name": "invoice_number",
+          "type": "varchar(30)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "first_name": {
+          "autoincrement": false,
+          "name": "first_name",
+          "type": "varchar(50)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "last_name": {
+          "autoincrement": false,
+          "name": "last_name",
+          "type": "varchar(50)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "mobile_number": {
+          "autoincrement": false,
+          "name": "mobile_number",
+          "type": "varchar(50)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "phone": {
+          "autoincrement": false,
+          "name": "phone",
+          "type": "varchar(50)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "email": {
+          "autoincrement": false,
+          "name": "email",
+          "type": "varchar(50)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "discount_coupon_id": {
+          "default": 0,
+          "autoincrement": false,
+          "name": "discount_coupon_id",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "discount_coupon_code": {
+          "autoincrement": false,
+          "name": "discount_coupon_code",
+          "type": "varchar(40)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "coupon_discount_amount": {
+          "autoincrement": false,
+          "name": "coupon_discount_amount",
+          "type": "float(10,2)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "total_amount": {
+          "default": "'0.00'",
+          "autoincrement": false,
+          "name": "total_amount",
+          "type": "decimal(10,2)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "vat_amount": {
+          "default": "'0.00'",
+          "autoincrement": false,
+          "name": "vat_amount",
+          "type": "decimal(10,2)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "vat_applied_cent": {
+          "default": 0,
+          "autoincrement": false,
+          "name": "vat_applied_cent",
+          "type": "float(10,2)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "currency_code": {
+          "autoincrement": false,
+          "name": "currency_code",
+          "type": "char(3)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "currency_symbol": {
+          "autoincrement": false,
+          "name": "currency_symbol",
+          "type": "char(10)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "currency_value": {
+          "default": "'0.000000'",
+          "autoincrement": false,
+          "name": "currency_value",
+          "type": "decimal(14,6)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "order_status": {
+          "default": "'Placed'",
+          "autoincrement": false,
+          "name": "order_status",
+          "type": "varchar(10)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "order_received_date": {
+          "default": "'0000-00-00 00:00:00'",
+          "autoincrement": false,
+          "name": "order_received_date",
+          "type": "datetime",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "payment_method": {
+          "autoincrement": false,
+          "name": "payment_method",
+          "type": "varchar(200)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "payment_status": {
+          "default": "'Unpaid'",
+          "autoincrement": false,
+          "name": "payment_status",
+          "type": "enum('Paid','Unpaid')",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "compositePrimaryKeys": {
+        "wl_orders_order_id": {
+          "name": "wl_orders_order_id",
+          "columns": [
+            "order_id"
+          ]
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraint": {}
+    },
+    "wl_packages": {
+      "name": "wl_packages",
+      "columns": {
+        "package_id": {
+          "autoincrement": true,
+          "name": "package_id",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "category_id": {
+          "default": 0,
+          "autoincrement": false,
+          "name": "category_id",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "category_links": {
+          "autoincrement": false,
+          "name": "category_links",
+          "type": "varchar(80)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "package_name": {
+          "autoincrement": false,
+          "name": "package_name",
+          "type": "varchar(100)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "friendly_url": {
+          "autoincrement": false,
+          "name": "friendly_url",
+          "type": "varchar(110)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "package_code": {
+          "autoincrement": false,
+          "name": "package_code",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "duration_id": {
+          "default": 0,
+          "autoincrement": false,
+          "name": "duration_id",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "package_price": {
+          "default": 0,
+          "autoincrement": false,
+          "name": "package_price",
+          "type": "float(15,2)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "package_discounted_price": {
+          "default": 0,
+          "autoincrement": false,
+          "name": "package_discounted_price",
+          "type": "float(15,2)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "package_description": {
+          "autoincrement": false,
+          "name": "package_description",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "is_featured": {
+          "default": "'0'",
+          "autoincrement": false,
+          "name": "is_featured",
+          "type": "enum('1','0')",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "default": "'1'",
+          "autoincrement": false,
+          "name": "status",
+          "type": "enum('0','1','2')",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "package_added_date": {
+          "default": "'0000-00-00 00:00:00'",
+          "autoincrement": false,
+          "name": "package_added_date",
+          "type": "datetime",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "package_updated_date": {
+          "default": "'0000-00-00 00:00:00'",
+          "autoincrement": false,
+          "name": "package_updated_date",
+          "type": "datetime",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "package_viewed": {
+          "default": 0,
+          "autoincrement": false,
+          "name": "package_viewed",
+          "type": "int unsigned",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "package_alt": {
+          "autoincrement": false,
+          "name": "package_alt",
+          "type": "varchar(100)",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "compositePrimaryKeys": {
+        "wl_packages_package_id": {
+          "name": "wl_packages_package_id",
+          "columns": [
+            "package_id"
+          ]
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraint": {}
+    },
+    "wl_packages_media": {
+      "name": "wl_packages_media",
+      "columns": {
+        "id": {
+          "autoincrement": true,
+          "name": "id",
+          "type": "int unsigned",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "package_id": {
+          "default": 0,
+          "autoincrement": false,
+          "name": "package_id",
+          "type": "int unsigned",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "media_type": {
+          "default": "'photo'",
+          "autoincrement": false,
+          "name": "media_type",
+          "type": "enum('photo','video','pdf')",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "media": {
+          "autoincrement": false,
+          "name": "media",
+          "type": "varchar(255)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "is_default": {
+          "default": "'N'",
+          "autoincrement": false,
+          "name": "is_default",
+          "type": "enum('Y','N')",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "media_date_added": {
+          "default": "'0000-00-00 00:00:00'",
+          "autoincrement": false,
+          "name": "media_date_added",
+          "type": "datetime",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "compositePrimaryKeys": {
+        "wl_packages_media_id": {
+          "name": "wl_packages_media_id",
+          "columns": [
+            "id"
+          ]
+        }
+      },
+      "indexes": {
+        "idx_products_images_products_id": {
+          "name": "idx_products_images_products_id",
+          "columns": [
+            "package_id"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraint": {}
+    },
+    "wl_portfolios": {
+      "name": "wl_portfolios",
+      "columns": {
+        "portfolio_id": {
+          "autoincrement": true,
+          "name": "portfolio_id",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "portfolio_title": {
+          "autoincrement": false,
+          "name": "portfolio_title",
+          "type": "varchar(90)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "friendly_url": {
+          "autoincrement": false,
+          "name": "friendly_url",
+          "type": "varchar(100)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "portfolio_image": {
+          "autoincrement": false,
+          "name": "portfolio_image",
+          "type": "varchar(50)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "portfolio_description": {
+          "autoincrement": false,
+          "name": "portfolio_description",
+          "type": "longtext",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "sort_order": {
+          "autoincrement": false,
+          "name": "sort_order",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "is_home": {
+          "default": 0,
+          "autoincrement": false,
+          "name": "is_home",
+          "type": "tinyint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "default": 1,
+          "autoincrement": false,
+          "name": "status",
+          "type": "tinyint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "portfolio_date_added": {
+          "default": "'0000-00-00 00:00:00'",
+          "autoincrement": false,
+          "name": "portfolio_date_added",
+          "type": "datetime",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "portfolio_date_updated": {
+          "default": "'0000-00-00 00:00:00'",
+          "autoincrement": false,
+          "name": "portfolio_date_updated",
+          "type": "datetime",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "compositePrimaryKeys": {
+        "wl_portfolios_portfolio_id": {
+          "name": "wl_portfolios_portfolio_id",
+          "columns": [
+            "portfolio_id"
+          ]
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraint": {}
+    },
+    "wl_salons": {
+      "name": "wl_salons",
+      "columns": {
+        "salon_id": {
+          "autoincrement": true,
+          "name": "salon_id",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "salon_name": {
+          "autoincrement": false,
+          "name": "salon_name",
+          "type": "varchar(90)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "salon_image": {
+          "autoincrement": false,
+          "name": "salon_image",
+          "type": "varchar(50)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "city_id": {
+          "default": 0,
+          "autoincrement": false,
+          "name": "city_id",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "location_id": {
+          "default": 0,
+          "autoincrement": false,
+          "name": "location_id",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "sort_order": {
+          "autoincrement": false,
+          "name": "sort_order",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "status": {
+          "default": 1,
+          "autoincrement": false,
+          "name": "status",
+          "type": "tinyint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "salon_date_added": {
+          "default": "'0000-00-00 00:00:00'",
+          "autoincrement": false,
+          "name": "salon_date_added",
+          "type": "datetime",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "salon_date_updated": {
+          "default": "'0000-00-00 00:00:00'",
+          "autoincrement": false,
+          "name": "salon_date_updated",
+          "type": "datetime",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "compositePrimaryKeys": {
+        "wl_salons_salon_id": {
+          "name": "wl_salons_salon_id",
+          "columns": [
+            "salon_id"
+          ]
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraint": {}
+    },
+    "wl_sessions": {
+      "name": "wl_sessions",
+      "columns": {
+        "id": {
+          "autoincrement": false,
+          "name": "id",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "ip_address": {
+          "autoincrement": false,
+          "name": "ip_address",
+          "type": "varchar(45)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "timestamp": {
+          "default": 0,
+          "autoincrement": false,
+          "name": "timestamp",
+          "type": "int unsigned",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "data": {
+          "autoincrement": false,
+          "name": "data",
+          "type": "blob",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "compositePrimaryKeys": {
+        "wl_sessions_id_ip_address": {
+          "name": "wl_sessions_id_ip_address",
+          "columns": [
+            "id",
+            "ip_address"
+          ]
+        }
+      },
+      "indexes": {
+        "ci_sessions_timestamp": {
+          "name": "ci_sessions_timestamp",
+          "columns": [
+            "timestamp"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraint": {}
+    },
+    "wl_student_results": {
+      "name": "wl_student_results",
+      "columns": {
+        "result_id": {
+          "autoincrement": true,
+          "name": "result_id",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "student_id": {
+          "default": 0,
+          "autoincrement": false,
+          "name": "student_id",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "center_id": {
+          "default": 0,
+          "autoincrement": false,
+          "name": "center_id",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "course_id": {
+          "default": 0,
+          "autoincrement": false,
+          "name": "course_id",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "total_marks": {
+          "default": 0,
+          "autoincrement": false,
+          "name": "total_marks",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "student_marks": {
+          "default": 0,
+          "autoincrement": false,
+          "name": "student_marks",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "certificate": {
+          "autoincrement": false,
+          "name": "certificate",
+          "type": "varchar(80)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "marksheet": {
+          "autoincrement": false,
+          "name": "marksheet",
+          "type": "varchar(80)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "status": {
+          "default": "'1'",
+          "autoincrement": false,
+          "name": "status",
+          "type": "enum('0','1','2')",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "result_added_date": {
+          "default": "'0000-00-00 00:00:00'",
+          "autoincrement": false,
+          "name": "result_added_date",
+          "type": "datetime",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "result_updated_date": {
+          "default": "'0000-00-00 00:00:00'",
+          "autoincrement": false,
+          "name": "result_updated_date",
+          "type": "datetime",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "certificate_uploaded_date": {
+          "default": "'0000-00-00 00:00:00'",
+          "autoincrement": false,
+          "name": "certificate_uploaded_date",
+          "type": "datetime",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "marksheet_uploaded_date": {
+          "autoincrement": false,
+          "name": "marksheet_uploaded_date",
+          "type": "datetime",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "compositePrimaryKeys": {
+        "wl_student_results_result_id": {
+          "name": "wl_student_results_result_id",
+          "columns": [
+            "result_id"
+          ]
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraint": {}
+    },
+    "wl_students": {
+      "name": "wl_students",
+      "columns": {
+        "student_id": {
+          "autoincrement": true,
+          "name": "student_id",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "center_id": {
+          "default": 0,
+          "autoincrement": false,
+          "name": "center_id",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "category_id": {
+          "default": 0,
+          "autoincrement": false,
+          "name": "category_id",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "course_id": {
+          "default": 0,
+          "autoincrement": false,
+          "name": "course_id",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "registration_number": {
+          "autoincrement": false,
+          "name": "registration_number",
+          "type": "varchar(40)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "doj": {
+          "autoincrement": false,
+          "name": "doj",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "student_name": {
+          "autoincrement": false,
+          "name": "student_name",
+          "type": "varchar(200)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "mother_name": {
+          "autoincrement": false,
+          "name": "mother_name",
+          "type": "varchar(50)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "father_name": {
+          "autoincrement": false,
+          "name": "father_name",
+          "type": "varchar(50)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "email_id": {
+          "autoincrement": false,
+          "name": "email_id",
+          "type": "varchar(80)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "dob": {
+          "autoincrement": false,
+          "name": "dob",
+          "type": "varchar(20)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "mobile_number": {
+          "autoincrement": false,
+          "name": "mobile_number",
+          "type": "varchar(20)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "address": {
+          "autoincrement": false,
+          "name": "address",
+          "type": "varchar(255)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "city_id": {
+          "default": 0,
+          "autoincrement": false,
+          "name": "city_id",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "location_id": {
+          "default": 0,
+          "autoincrement": false,
+          "name": "location_id",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "student_image": {
+          "autoincrement": false,
+          "name": "student_image",
+          "type": "varchar(80)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "duration_id": {
+          "default": 0,
+          "autoincrement": false,
+          "name": "duration_id",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "paid_amount": {
+          "default": 0,
+          "autoincrement": false,
+          "name": "paid_amount",
+          "type": "float(15,2)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "payment_type": {
+          "autoincrement": false,
+          "name": "payment_type",
+          "type": "varchar(20)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "other_details": {
+          "autoincrement": false,
+          "name": "other_details",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "status": {
+          "default": "'1'",
+          "autoincrement": false,
+          "name": "status",
+          "type": "enum('0','1','2')",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "student_added_date": {
+          "default": "'0000-00-00 00:00:00'",
+          "autoincrement": false,
+          "name": "student_added_date",
+          "type": "datetime",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "student_updated_date": {
+          "default": "'0000-00-00 00:00:00'",
+          "autoincrement": false,
+          "name": "student_updated_date",
+          "type": "datetime",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "id_card": {
+          "autoincrement": false,
+          "name": "id_card",
+          "type": "varchar(80)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "id_card_uploaded_date": {
+          "autoincrement": false,
+          "name": "id_card_uploaded_date",
+          "type": "datetime",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "compositePrimaryKeys": {
+        "wl_students_student_id": {
+          "name": "wl_students_student_id",
+          "columns": [
+            "student_id"
+          ]
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraint": {}
+    },
+    "wl_testimonials": {
+      "name": "wl_testimonials",
+      "columns": {
+        "testimonial_id": {
+          "autoincrement": true,
+          "name": "testimonial_id",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "testimonial_title": {
+          "autoincrement": false,
+          "name": "testimonial_title",
+          "type": "varchar(150)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "poster_name": {
+          "autoincrement": false,
+          "name": "poster_name",
+          "type": "varchar(30)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "friendly_url": {
+          "autoincrement": false,
+          "name": "friendly_url",
+          "type": "varchar(100)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "email": {
+          "autoincrement": false,
+          "name": "email",
+          "type": "varchar(80)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "testimonial_description": {
+          "autoincrement": false,
+          "name": "testimonial_description",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "photo": {
+          "autoincrement": false,
+          "name": "photo",
+          "type": "varchar(255)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "posted_date": {
+          "autoincrement": false,
+          "name": "posted_date",
+          "type": "datetime",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "status": {
+          "default": "'0'",
+          "autoincrement": false,
+          "name": "status",
+          "type": "enum('1','0')",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "compositePrimaryKeys": {
+        "wl_testimonials_testimonial_id": {
+          "name": "wl_testimonials_testimonial_id",
+          "columns": [
+            "testimonial_id"
+          ]
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraint": {}
+    }
+  },
+  "views": {},
+  "_meta": {
+    "schemas": {},
+    "tables": {},
+    "columns": {}
+  },
+  "internal": {
+    "tables": {},
+    "indexes": {}
+  }
+}

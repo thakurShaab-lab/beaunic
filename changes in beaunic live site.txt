@@ -1,0 +1,19 @@
+apps->core->Admin_Controller
+
+
+
+site panel ->
+
+subadmin(folder), subadmin(cont), includes(subadmin_js, subadmin_activity) , dashboard-> admin_left_view, libraries->Admin_lib.php, helpers->admin_helpers.php,
+sitepanel (all views)
+
+
+table
+
+
+subadmin_activity_record , tbl_admin_allowed_sections , tbl_admin_sections 
+
+ALTER TABLE `tbl_admin` ADD `admin_name` VARCHAR(450) NULL DEFAULT NULL AFTER `admin_key`;
+
+ALTER TABLE `tbl_admin` ADD `post_date` DATE NULL DEFAULT NULL AFTER `whatsapp_message`;
+

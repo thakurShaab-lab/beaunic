@@ -1,0 +1,124 @@
+{
+  "info": {
+    "name": "Beaunic Auth",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://127.0.0.1:3011/api/auth"
+    },
+    {
+      "key": "email",
+      "value": "sanjeev@gmail.com"
+    },
+    {
+      "key": "password",
+      "value": "admin123"
+    },
+    {
+      "key": "mobileNumber",
+      "value": "7845121245"
+    },
+    {
+      "key": "otp",
+      "value": ""
+    },
+    {
+      "key": "token",
+      "value": ""
+    }
+  ],
+  "item": [
+    {
+      "name": "1. Login - Email & Password",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "const body = pm.response.json();",
+              "if (body.data && body.data.token) pm.collectionVariables.set('token', body.data.token);"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{baseUrl}}/login",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n    \"emailOrMobile\": \"{{email}}\",\n    \"password\": \"{{password}}\"\n}"
+        }
+      }
+    },
+    {
+      "name": "2. Login - Mobile (sends OTP)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{baseUrl}}/login",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n    \"emailOrMobile\": \"{{mobileNumber}}\"\n}"
+        }
+      }
+    },
+    {
+      "name": "3. Verify OTP",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "const body = pm.response.json();",
+              "if (body.data && body.data.token) pm.collectionVariables.set('token', body.data.token);"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{baseUrl}}/verify-otp",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n    \"mobileNumber\": \"{{mobileNumber}}\",\n    \"otp\": \"{{otp}}\"\n}"
+        }
+      }
+    },
+    {
+      "name": "4. Resend OTP",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{baseUrl}}/resend-otp",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n    \"mobileNumber\": \"{{mobileNumber}}\"\n}"
+        }
+      }
+    }
+  ]
+}
