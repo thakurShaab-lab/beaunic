@@ -9,9 +9,12 @@ const env = require('./src/config/env')
 const logger = require('./src/utils/logger')
 require('./src/config/db')
 require('./src/config/drizzle')
+require('./src/config/zod')
 const authRoutes = require('./src/routes/auth.routes')
 const membershipRoutes = require('./src/routes/membership.routes')
 const addressRoutes = require('./src/routes/address.routes')
+const profileRoutes = require('./src/routes/profile.routes')
+const supportRoutes = require('./src/routes/support.routes')
 
 
 const app = express()
@@ -106,6 +109,8 @@ app.get('/api', (req, res) => {
 app.use('/api/auth', authRoutes)
 app.use('/api/membership', membershipRoutes)
 app.use('/api/address', addressRoutes)
+app.use('/api/profile', profileRoutes)
+app.use('/api/support', supportRoutes)
 
 
 const server = app.listen(env.port, '127.0.0.1', () => {

@@ -169,6 +169,7 @@ const resendOtpSchema = otpSchema.pick({
 const accountStatusSchema = z.object({
     app_id: z.union([z.string(), z.number()]),
     device_id: z.string().trim().min(1, 'Device ID is required'),
+    customerId: z.coerce.number({ error: 'Customer ID is required' }).int().positive('Customer ID is required'),
 }).strict()
 
 const SALON_ONBOARDING_STEPS = [
@@ -184,7 +185,7 @@ const ACCOUNT_STATUS_LABELS = {
 }
 
 const sendValidationError = (res, error) =>
-    res.status(400).json({
+    res.status(200).json({
         success: false,
         message: 'Validation failed',
         errors: error.issues.map((i) => ({ field: i.path.join('.'), message: i.message })),
@@ -201,13 +202,13 @@ const getLockError = (customer) => {
 
     const blockedAt = parseDbDate(customer.blockTime)
     if (!blockedAt) {
-        return { status: 403, message: 'Your account has been blocked. Please contact support.' }
+        return { status: 200, message: 'Your account has been blocked. Please contact support.' }
     }
 
     const unblockAt = blockedAt.getTime() + LOGIN_BLOCK_MINUTES * 60 * 1000
     if (unblockAt > Date.now()) {
         const minutes = Math.ceil((unblockAt - Date.now()) / 60000)
-        return { status: 429, message: `Too many failed attempts. Please try again in ${minutes} minute(s).` }
+        return { status: 200, message: `Too many failed attempts. Please try again in ${minutes} minute(s).` }
     }
 
     return null
@@ -215,7 +216,7 @@ const getLockError = (customer) => {
 
 const getStatusError = (customer) => {
     const message = ACCOUNT_STATUS_ERRORS[customer.status]
-    return message ? { status: 403, message } : null
+    return message ? { status: 200, message } : null
 }
 
 const sendError = (res, { status, message }) => res.status(status).json({ success: false, message })
@@ -226,7 +227,7 @@ const registerFailedAttempt = async (res, customer, message) => {
 
     await authModel.recordFailedLogin(customer.customerId, tries, attemptsLeft <= 0)
 
-    return res.status(401).json({
+    return res.status(200).json({
         success: false,
         message: attemptsLeft > 0
             ? `${message} ${attemptsLeft} attempt(s) left.`
@@ -286,7 +287,7 @@ const issueOtp = async (res, customer, message) => {
 const findLoginCustomerByMobile = async (res, mobileNumber) => {
     const customer = await authModel.findByMobile(mobileNumber)
     if (!customer) {
-        sendError(res, { status: 404, message: 'No account found with this mobile number. Please register first.' })
+        sendError(res, { status: 200, message: 'No account found with this mobile number. Please register first.' })
         return null
     }
 
@@ -304,7 +305,7 @@ const hasPendingOtp = (customer) => Boolean(customer.loginOtp) && customer.isOtp
 const register = async (req, res) => {
     const parsed = registerSchema.safeParse(req.body)
     if (!parsed.success) {
-        return res.status(400).json({
+        return res.status(200).json({
             success: false,
             message: 'Validation failed',
             errors: parsed.error.issues.map((i) => ({ field: i.path.join('.'), message: i.message })),
@@ -315,18 +316,18 @@ const register = async (req, res) => {
     let logoName = null
     if (req.file) {
         if (d.customerType !== '1') {
-            return res.status(400).json({ success: false, message: 'Logo is only allowed for Salon Partner' })
+            return res.status(200).json({ success: false, message: 'Logo is only allowed for Salon Partner' })
         }
         const ext = detectImageExt(req.file.buffer)
         if (!ext) {
-            return res.status(400).json({ success: false, message: 'Logo must be a PNG or JPG image' })
+            return res.status(200).json({ success: false, message: 'Logo must be a PNG or JPG image' })
         }
         logoName = crypto.randomBytes(12).toString('hex') + ext
     }
 
     try {
         if (await authModel.findByEmailOrMobile(d.emailId, d.contactNumber)) {
-            return res.status(409).json({
+            return res.status(200).json({
                 success: false,
                 message: 'An account with this email or mobile number already exists',
             })
@@ -362,17 +363,16 @@ const register = async (req, res) => {
         if (logoName) await fs.unlink(path.join(UPLOAD_DIR, logoName)).catch(() => { })
         const code = err.code || err.cause?.code
         if (code === 'ER_DUP_ENTRY') {
-            return res.status(409).json({
+            return res.status(200).json({
                 success: false,
                 message: 'An account with this email or mobile number already exists',
             })
         }
         console.error('Registration error:', err)
-        return res.status(500).json({ success: false, message: 'Something went wrong' })
+        return res.status(200).json({ success: false, message: 'Something went wrong' })
     }
 }
 
-// Shared by login and /account-status so both agree on what counts as a membership and an address
 const getProfileProgress = async (customerId) => {
     const [activeMembership, salonAdd] = await Promise.all([
         membershipModel.findActiveMembership(customerId),
@@ -392,13 +392,13 @@ const getProfileError = async (customer) => {
 
     if (membership && salonAdd) return null
 
-    return { status: 403, message: 'Please complete your profile first.' }
+    return { status: 200, message: 'Please complete your profile first.' }
 }
 
 const loginWithPassword = async (res, email, password) => {
     const customer = await authModel.findByEmail(email)
     if (!customer) {
-        return res.status(401).json({ success: false, message: 'Invalid email or password.' })
+        return res.status(200).json({ success: false, message: 'Invalid email or password.' })
     }
 
     const lockError = getLockError(customer)
@@ -412,7 +412,7 @@ const loginWithPassword = async (res, email, password) => {
     if (statusError) return sendError(res, statusError)
 
     if (customer.isVerified !== '1' && customer.status !== '1') {
-        return res.status(403).json({
+        return res.status(200).json({
             success: false,
             message: 'Your account is not verified yet. Please verify your account to continue.',
         })
@@ -451,7 +451,7 @@ const login = async (req, res) => {
         return await loginWithPassword(res, emailOrMobile.toLowerCase(), password)
     } catch (err) {
         console.error('Login error:', err)
-        return res.status(500).json({ success: false, message: 'Something went wrong' })
+        return res.status(200).json({ success: false, message: 'Something went wrong' })
     }
 }
 
@@ -469,12 +469,12 @@ const verifyOtp = async (req, res) => {
         if (!customer) return
 
         if (!hasPendingOtp(customer)) {
-            return res.status(400).json({ success: false, message: 'No active OTP found. Please request a new OTP.' })
+            return res.status(200).json({ success: false, message: 'No active OTP found. Please request a new OTP.' })
         }
 
         const sentAt = parseDbDate(customer.loginDateTime)
         if (!sentAt || Date.now() > sentAt.getTime() + OTP_EXPIRY_MINUTES * 60 * 1000) {
-            return res.status(400).json({ success: false, message: 'OTP has expired. Please request a new OTP.' })
+            return res.status(200).json({ success: false, message: 'OTP has expired. Please request a new OTP.' })
         }
 
         const profileError = await getProfileError(customer)
@@ -487,7 +487,7 @@ const verifyOtp = async (req, res) => {
         return completeLogin(res, customer)
     } catch (err) {
         console.error('OTP verification error:', err)
-        return res.status(500).json({ success: false, message: 'Something went wrong' })
+        return res.status(200).json({ success: false, message: 'Something went wrong' })
     }
 }
 
@@ -503,7 +503,7 @@ const resendOtp = async (req, res) => {
         if (!customer) return
 
         if (!hasPendingOtp(customer)) {
-            return res.status(400).json({
+            return res.status(200).json({
                 success: false,
                 message: 'No pending OTP request found. Please log in with your mobile number first.',
             })
@@ -512,7 +512,7 @@ const resendOtp = async (req, res) => {
         return await issueOtp(res, customer, 'A new OTP has been sent to your registered mobile number')
     } catch (err) {
         console.error('Resend OTP error:', err)
-        return res.status(500).json({ success: false, message: 'Something went wrong' })
+        return res.status(200).json({ success: false, message: 'Something went wrong' })
     }
 }
 
@@ -523,26 +523,25 @@ const accountStatus = async (req, res) => {
 
     if (!parsed.success) return sendValidationError(res, parsed.error)
 
-    const { app_id, device_id } = parsed.data
+    const { app_id, device_id, customerId } = parsed.data
 
     try {
-        const customer = await authModel.findByDevice(String(app_id).trim(), device_id)
+        const customer = await authModel.findByIdAndDevice(customerId, String(app_id).trim(), device_id)
         if (!customer) {
-            return res.status(404).json({ success: false, message: 'Account not found for this device.' })
+            return res.status(200).json({ success: false, message: 'Account not found for this device.' })
         }
 
         if (customer.customerType !== '1') {
-            return res.status(403).json({ success: false, message: 'Account status is only available for Salon Partners.' })
+            return res.status(200).json({ success: false, message: 'Account status is only available for Salon Partners.' })
         }
 
         const label = ACCOUNT_STATUS_LABELS[customer.status]
         if (!label) {
-            return sendError(res, { status: 403, message: ACCOUNT_STATUS_ERRORS[customer.status] })
+            return sendError(res, { status: 200, message: ACCOUNT_STATUS_ERRORS[customer.status] })
         }
 
         const { membership, salonAdd } = await getProfileProgress(customer.customerId)
 
-        // Steps run in order: admin review, then membership, then salon profile; 5 means all done
         const currentStep = customer.status !== '1' ? 2
             : !membership ? 3
             : !salonAdd ? 4
@@ -572,8 +571,8 @@ const accountStatus = async (req, res) => {
         })
     } catch (err) {
         console.error('Account status error:', err)
-        return res.status(500).json({ success: false, message: 'Something went wrong' })
+        return res.status(200).json({ success: false, message: 'Something went wrong' })
     }
 }
 
-module.exports = { register, login, verifyOtp, resendOtp, accountStatus }
+module.exports = { register, login, verifyOtp, resendOtp, accountStatus, detectImageExt, UPLOAD_DIR }

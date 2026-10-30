@@ -1,10 +1,8 @@
 const { eq, and, gte, notInArray } = require("drizzle-orm")
 const db = require("../config/drizzle")
 const { wlMembership } = require("../schema/wl-memberships")
-// wl-order.js exports the wl_order table as wlOrders, which clashes with wl_orders - alias it here
 const { wlOrders: wlOrder } = require("../schema/wl-order")
 
-// wl_memberships.status: 0=Inactive, 1=Active, 2=Deleted
 const planFields = {
     membershipId: wlMembership.membership_id,
     title: wlMembership.title,
@@ -45,7 +43,6 @@ const findActivePlanById = async (membershipId) => {
     return rows[0] || null
 }
 
-// A membership is active once paid and enabled, until its pkg_end_date has passed
 const findActiveMembership = async (customerId) => {
     const rows = await db
         .select({
@@ -61,7 +58,6 @@ const findActiveMembership = async (customerId) => {
                 eq(wlOrder.status, "1"),
                 eq(wlOrder.payment_status, "Paid"),
                 eq(wlOrder.membership_status, "1"),
-                // the live column spells it "Cancelled"; the schema file has "Canceled"
                 notInArray(wlOrder.order_status, ["Deleted", "Cancelled", "Canceled", "Rejected"]),
                 gte(wlOrder.pkg_end_date, todayString())
             )
@@ -72,7 +68,6 @@ const findActiveMembership = async (customerId) => {
 }
 
 const createOrder = async (values) => {
-    // Only the newest membership order for a customer is flagged is_latest = 1
     await db
         .update(wlOrder)
         .set({ is_latest: 0 })

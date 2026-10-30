@@ -9,17 +9,11 @@ const jwtAuthMiddleware = (req, res, next) => {
   try {
     const authHeader = req.headers.authorization
 
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      return res.status(401).json({
-        success: false,
-        message: 'Authorization token is required.',
-      })
-    }
-
-    const token = authHeader.slice(7).trim()
+    // The token is sent as-is in the Authorization header; a "Bearer " prefix is still accepted
+    const token = (authHeader || '').trim().replace(/^Bearer\s+/i, '').trim()
 
     if (!token) {
-      return res.status(401).json({
+      return res.status(200).json({
         success: false,
         message: 'Authorization token is required.',
       })
@@ -38,7 +32,7 @@ const jwtAuthMiddleware = (req, res, next) => {
       error.name === 'TokenExpiredError' ||
       error.name === 'NotBeforeError'
     ) {
-      return res.status(401).json({
+      return res.status(200).json({
         success: false,
         message: 'Invalid or expired token.',
       })
@@ -46,7 +40,7 @@ const jwtAuthMiddleware = (req, res, next) => {
 
     console.error('JWT authentication error:', error)
 
-    return res.status(500).json({
+    return res.status(200).json({
       success: false,
       message: 'Internal server error.',
     })
@@ -58,7 +52,6 @@ const deviceAuthMiddleware = async (req, res, next) => {
     const rawAppId = req.headers['x-app-id'] || req.body?.app_id
     const appId = typeof rawAppId === 'number' ? String(rawAppId) : rawAppId
     const deviceId = req.headers['x-device-id'] || req.body?.device_id
-    // app_type is optional; when sent it must also match the registered device
     const appType = req.headers['x-app-type'] || req.body?.app_type
 
     if (
@@ -67,14 +60,14 @@ const deviceAuthMiddleware = async (req, res, next) => {
       !appId.trim() ||
       !deviceId.trim()
     ) {
-      return res.status(401).json({
+      return res.status(200).json({
         success: false,
         message: 'app_id and device_id are required.',
       })
     }
 
     if (appType !== undefined && (typeof appType !== 'string' || !appType.trim())) {
-      return res.status(401).json({
+      return res.status(200).json({
         success: false,
         message: 'app_type must be a non-empty string.',
       })
@@ -98,7 +91,7 @@ const deviceAuthMiddleware = async (req, res, next) => {
       .limit(1)
 
     if (!customer) {
-      return res.status(401).json({
+      return res.status(200).json({
         success: false,
         message: 'Invalid app_id or device_id, or account is inactive.',
       })
@@ -115,7 +108,7 @@ const deviceAuthMiddleware = async (req, res, next) => {
   } catch (error) {
     console.error('Device authentication error:', error)
 
-    return res.status(500).json({
+    return res.status(200).json({
       success: false,
       message: 'Internal server error.',
     })

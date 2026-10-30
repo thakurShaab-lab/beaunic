@@ -11,12 +11,12 @@ const upload = multer({
             'image/jpeg',
             'image/png',
             'image/webp',
-            'image/HEIC'
+            'image/heic'
         ]
 
-        if (!allowedTypes.includes(file.mimetype)) {
+        if (!allowedTypes.includes(file.mimetype.toLowerCase())) {
             return cb(
-                new Error('Only JPG, PNG, and WEBP images are allowed')
+                new Error('Only JPG, PNG, WEBP and HEIC images are allowed')
             )
         }
 

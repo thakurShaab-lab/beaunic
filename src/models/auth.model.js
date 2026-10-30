@@ -1,6 +1,6 @@
 
 const crypto = require("crypto")
-const { eq, or, and, desc } = require("drizzle-orm")
+const { eq, or, and } = require("drizzle-orm")
 const db = require("../config/drizzle")
 const { wlCustomers } = require("../schema/wl-customers")
 const { wlCustomersAddressBook } = require("../schema/wl-customers-address-book")
@@ -154,8 +154,7 @@ const recordSuccessfulLogin = async (customerId, previousLogin) => {
         .where(eq(wlCustomers.customerId, customerId))
 }
 
-// register doesn't stop two accounts sharing a device, so prefer the most recently registered one
-const findByDevice = async (appId, deviceId) => {
+const findByIdAndDevice = async (customerId, appId, deviceId) => {
     const rows = await db
         .select({
             customerId: wlCustomers.customerId,
@@ -168,11 +167,11 @@ const findByDevice = async (appId, deviceId) => {
         .from(wlCustomers)
         .where(
             and(
+                eq(wlCustomers.customerId, customerId),
                 eq(wlCustomers.appId, appId),
                 eq(wlCustomers.deviceId, deviceId)
             )
         )
-        .orderBy(desc(wlCustomers.customerId))
         .limit(1)
 
     return rows[0] || null
@@ -188,8 +187,55 @@ const hasAddress = async (customerId) => {
     return rows.length > 0
 }
 
+const findProfile = async (customerId) => {
+    const rows = await db
+        .select({
+            customerId: wlCustomers.customerId,
+            customerType: wlCustomers.customerType,
+            firstName: wlCustomers.firstName,
+            userName: wlCustomers.userName,
+            mobileNumber: wlCustomers.mobileNumber,
+            salonName: wlCustomers.salonName,
+            customerPhoto: wlCustomers.customerPhoto,
+            serviceType: wlCustomers.serviceType,
+        })
+        .from(wlCustomers)
+        .where(eq(wlCustomers.customerId, customerId))
+        .limit(1)
+
+    return rows[0] || null
+}
+
+const updateProfile = async (customerId, values) => {
+    await db
+        .update(wlCustomers)
+        .set(values)
+        .where(eq(wlCustomers.customerId, customerId))
+}
+
+const findPasswordHash = async (customerId) => {
+    const rows = await db
+        .select({ password: wlCustomers.password })
+        .from(wlCustomers)
+        .where(eq(wlCustomers.customerId, customerId))
+        .limit(1)
+
+    return rows[0]?.password || null
+}
+
+const updatePassword = async (customerId, passwordHash) => {
+    await db
+        .update(wlCustomers)
+        .set({ password: passwordHash })
+        .where(eq(wlCustomers.customerId, customerId))
+}
+
 module.exports = {
-    findByDevice,
+    findProfile,
+    updateProfile,
+    findPasswordHash,
+    updatePassword,
+    findByIdAndDevice,
     hasAddress,
     findByEmailOrMobile,
     create,

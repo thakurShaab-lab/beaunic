@@ -8,6 +8,7 @@ const { convertNulls } = require('../utils/convertNulls')
 const deviceFields = {
     app_id: z.union([z.string(), z.number()]),
     device_id: z.string().trim().min(1, 'Device ID is required'),
+    customerId: z.coerce.number({ error: 'Customer ID is required' }).int().positive('Customer ID is required'),
 }
 
 const listMembershipsSchema = z.object(deviceFields).strict()
@@ -18,7 +19,7 @@ const purchaseMembershipSchema = z.object({
 }).strict()
 
 const sendValidationError = (res, error) =>
-    res.status(400).json({
+    res.status(200).json({
         success: false,
         message: 'Validation failed',
         errors: error.issues.map((i) => ({ field: i.path.join('.'), message: i.message })),
@@ -37,7 +38,6 @@ const formatPlan = (plan) => convertNulls({
     buyLeadCount: plan.buyLeadCount,
 })
 
-// wl_order.duration is stored in months
 const addMonths = (dateString, months) => {
     const date = new Date(`${dateString}T00:00:00Z`)
     date.setUTCMonth(date.getUTCMonth() + months)
@@ -47,20 +47,20 @@ const addMonths = (dateString, months) => {
 const generateInvoiceNumber = () =>
     `MEM-${membershipModel.todayString().replace(/-/g, '')}-${crypto.randomBytes(3).toString('hex').toUpperCase()}`
 
-const findSalonPartner = async (res, { app_id, device_id }) => {
-    const customer = await authModel.findByDevice(String(app_id).trim(), device_id)
+const findSalonPartner = async (res, { app_id, device_id, customerId }) => {
+    const customer = await authModel.findByIdAndDevice(customerId, String(app_id).trim(), device_id)
     if (!customer) {
-        res.status(404).json({ success: false, message: 'Account not found for this device.' })
+        res.status(200).json({ success: false, message: 'Account not found for this device.' })
         return null
     }
 
     if (customer.customerType !== '1') {
-        res.status(403).json({ success: false, message: 'This feature is only available for Salon Partners.' })
+        res.status(200).json({ success: false, message: 'This feature is only available for Salon Partners.' })
         return null
     }
 
     if (customer.status !== '1') {
-        res.status(403).json({
+        res.status(200).json({
             success: false,
             message: customer.status === '0'
                 ? 'Your account is awaiting admin approval.'
@@ -98,7 +98,7 @@ const listMemberships = async (req, res) => {
         })
     } catch (err) {
         console.error('List memberships error:', err)
-        return res.status(500).json({ success: false, message: 'Something went wrong' })
+        return res.status(200).json({ success: false, message: 'Something went wrong' })
     }
 }
 
@@ -115,18 +115,17 @@ const purchaseMembership = async (req, res) => {
 
         const plan = await membershipModel.findActivePlanById(parsed.data.membershipId)
         if (!plan) {
-            return res.status(404).json({ success: false, message: 'Membership plan not found.' })
+            return res.status(200).json({ success: false, message: 'Membership plan not found.' })
         }
 
         const activeMembership = await membershipModel.findActiveMembership(customer.customerId)
         if (activeMembership) {
-            return res.status(409).json({
+            return res.status(200).json({
                 success: false,
                 message: `You already have an active membership (${activeMembership.membershipName}) valid until ${activeMembership.endDate}.`,
             })
         }
 
-        // Every purchase is saved as Paid and activated straight away (no payment gateway yet)
         const startDate = membershipModel.todayString()
         const endDate = addMonths(startDate, plan.duration)
         const invoiceNumber = generateInvoiceNumber()
@@ -180,7 +179,7 @@ const purchaseMembership = async (req, res) => {
         })
     } catch (err) {
         console.error('Purchase membership error:', err)
-        return res.status(500).json({ success: false, message: 'Something went wrong' })
+        return res.status(200).json({ success: false, message: 'Something went wrong' })
     }
 }
 
