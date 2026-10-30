@@ -1,7 +1,6 @@
 const multer = require('multer')
 const upload = require('../utils/imageUpload')
 
-// FormData can't send real nulls, so apps often send these strings for an unset field
 const EMPTY_VALUES = new Set(['', 'null', 'undefined'])
 
 const looksLikeJson = (value) => /^(\[[\s\S]*\]|\{[\s\S]*\})$/.test(value)

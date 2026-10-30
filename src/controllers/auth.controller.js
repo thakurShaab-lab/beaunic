@@ -239,22 +239,20 @@ const completeLogin = async (res, customer) => {
     await authModel.recordSuccessfulLogin(customer.customerId, customer.currentLogin)
 
     return res.status(200).json({
-        success: true,
-        message: 'Login successful',
-        data: {
-            token: generateToken(customer),
-            customer: convertNulls({
-                customerId: customer.customerId,
-                name: customer.firstName,
-                emailId: customer.userName,
-                contactNumber: customer.mobileNumber,
-                customerType: customer.customerType,
-                serviceType: customer.serviceType,
-                salonName: customer.salonName,
-                loginType: customer.loginType,
-            }),
-        },
-    })
+    success: true,
+    message: 'Login successful',
+    data: convertNulls({
+        token: generateToken(customer),
+        customerId: customer.customerId,
+        name: customer.firstName,
+        emailId: customer.userName,
+        contactNumber: customer.mobileNumber,
+        customerType: customer.customerType,
+        serviceType: customer.serviceType,
+        salonName: customer.salonName,
+        loginType: customer.loginType,
+    }),
+});
 }
 
 const issueOtp = async (res, customer, message) => {
@@ -544,8 +542,8 @@ const accountStatus = async (req, res) => {
 
         const currentStep = customer.status !== '1' ? 2
             : !membership ? 3
-            : !salonAdd ? 4
-            : 5
+                : !salonAdd ? 4
+                    : 5
 
         return res.status(200).json({
             success: true,

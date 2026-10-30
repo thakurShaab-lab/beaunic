@@ -289,4 +289,4 @@ const changePassword = async (req, res) => {
     }
 }
 
-module.exports = { getProfile, updateProfile, changePassword }
+module.exports = { getProfile, updateProfile, changePassword, findLoggedInCustomer }
