@@ -68,6 +68,7 @@ const sendValidationError = (res, error) =>
 
 const findLoggedInCustomer = async (req, res, { app_id, device_id }) => {
     const customer = await authModel.findByIdAndDevice(req.user.customerId, String(app_id).trim(), device_id)
+    console.log('Logged in customer:', customer)
     if (!customer) {
         res.status(200).json({ success: false, message: 'Account not found for this device.' })
         return null

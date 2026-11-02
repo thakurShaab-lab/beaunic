@@ -16,6 +16,8 @@ const addressRoutes = require('./src/routes/address.routes')
 const profileRoutes = require('./src/routes/profile.routes')
 const supportRoutes = require('./src/routes/support.routes')
 const locationRoutes = require('./src/routes/location.routes')
+const categoryRoutes = require('./src/routes/category.routes')
+const serviceRoutes = require('./src/routes/service.routes')
 
 
 const app = express()
@@ -113,6 +115,8 @@ app.use('/api/address', addressRoutes)
 app.use('/api/profile', profileRoutes)
 app.use('/api/support', supportRoutes)
 app.use('/api/location', locationRoutes)
+app.use('/api/category', categoryRoutes)
+app.use('/api/service', serviceRoutes)
 
 
 const server = app.listen(env.port, '127.0.0.1', () => {

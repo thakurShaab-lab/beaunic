@@ -47,6 +47,7 @@ const findActiveMembership = async (customerId) => {
     const rows = await db
         .select({
             orderId: wlOrder.order_id,
+            membershipId: wlOrder.mship_id,
             membershipName: wlOrder.mship_name,
             endDate: wlOrder.pkg_end_date,
         })

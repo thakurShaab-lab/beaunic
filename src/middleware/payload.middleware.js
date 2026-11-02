@@ -67,14 +67,32 @@ const sendUploadError = (res, err) => {
 }
 
 
-const parsePayload = (fileField) => {
-    const parseForm = fileField ? upload.single(fileField) : upload.none()
+// Pass a list for routes that take several images, e.g. parsePayload(['coverImage', { name: 'images', maxCount: 2 }])
+const parseFormFor = (fileField) => {
+    if (Array.isArray(fileField)) {
+        return upload.fields(fileField.map((field) => (typeof field === 'string' ? { name: field, maxCount: 1 } : field)))
+    }
+    return fileField ? upload.single(fileField) : upload.none()
+}
+
+const isEmptyValue = (value) =>
+    value === null || (typeof value === 'string' && EMPTY_VALUES.has(value.trim()))
+
+// emptyAsNull: fields where a blank value means "clear it" rather than "not sent"; they reach the controller as null
+const parsePayload = (fileField, { emptyAsNull = [] } = {}) => {
+    const parseForm = parseFormFor(fileField)
 
     return (req, res, next) => {
         parseForm(req, res, (err) => {
             if (err) return sendUploadError(res, err)
 
-            req.body = normaliseObject(req.body || {})
+            const raw = req.body || {}
+            req.body = normaliseObject(raw)
+
+            for (const field of emptyAsNull) {
+                if (Object.prototype.hasOwnProperty.call(raw, field) && isEmptyValue(raw[field])) req.body[field] = null
+            }
+
             next()
         })
     }
