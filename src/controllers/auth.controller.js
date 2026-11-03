@@ -2,6 +2,7 @@ const fs = require('fs/promises')
 const path = require('path')
 const crypto = require('crypto')
 const { z } = require('zod')
+const { sendValidationError } = require('../utils/validationError')
 const bcrypt = require('bcryptjs')
 const authModel = require('../models/auth.model')
 const membershipModel = require('../models/membership.model')
@@ -179,17 +180,22 @@ const SALON_ONBOARDING_STEPS = [
     { key: 'complete_salon_profile', title: 'Complete salon profile' },
 ]
 
+// Salon Partner onboarding step, numbered like SALON_ONBOARDING_STEPS (step 1, registration, is always done):
+// 2 = awaiting admin approval, 3 = choose membership, 4 = complete salon profile, 5 = all done
+const ONBOARDING_COMPLETE_STEP = SALON_ONBOARDING_STEPS.length + 1
+
+const getCurrentStep = ({ status, membership, salonAdd }) =>
+    status !== '1' ? 2
+        : !membership ? 3
+            : !salonAdd ? 4
+                : ONBOARDING_COMPLETE_STEP
+
+const isSalonPartner = (customer) => customer.customerType === '1'
+
 const ACCOUNT_STATUS_LABELS = {
     '0': 'Awaiting Admin Approval',
     '1': 'Approved',
 }
-
-const sendValidationError = (res, error) =>
-    res.status(200).json({
-        success: false,
-        message: 'Validation failed',
-        errors: error.issues.map((i) => ({ field: i.path.join('.'), message: i.message })),
-    })
 
 const parseDbDate = (value) => {
     if (!value) return null
@@ -216,10 +222,16 @@ const getLockError = (customer) => {
 
 const getStatusError = (customer) => {
     const message = ACCOUNT_STATUS_ERRORS[customer.status]
-    return message ? { status: 200, message } : null
+    if (!message) return null
+
+    // A Salon Partner still awaiting admin approval is on step 2
+    return isSalonPartner(customer) && customer.status === '0'
+        ? { status: 200, message, currentStep: getCurrentStep(customer) }
+        : { status: 200, message }
 }
 
-const sendError = (res, { status, message }) => res.status(status).json({ success: false, message })
+// extra: more keys for the response body, e.g. currentStep
+const sendError = (res, { status, message, ...extra }) => res.status(status).json({ success: false, message, ...extra })
 
 const registerFailedAttempt = async (res, customer, message) => {
     const tries = (customer.isBlocked === '1' ? 0 : customer.numberOfLoginTry) + 1
@@ -251,6 +263,8 @@ const completeLogin = async (res, customer) => {
         serviceType: customer.serviceType,
         salonName: customer.salonName,
         loginType: customer.loginType,
+        // Salon Partners only log in once onboarding is complete (see getProfileError)
+        ...(isSalonPartner(customer) && { currentStep: ONBOARDING_COMPLETE_STEP }),
     }),
 });
 }
@@ -302,13 +316,7 @@ const hasPendingOtp = (customer) => Boolean(customer.loginOtp) && customer.isOtp
 
 const register = async (req, res) => {
     const parsed = registerSchema.safeParse(req.body)
-    if (!parsed.success) {
-        return res.status(200).json({
-            success: false,
-            message: 'Validation failed',
-            errors: parsed.error.issues.map((i) => ({ field: i.path.join('.'), message: i.message })),
-        })
-    }
+    if (!parsed.success) return sendValidationError(res, parsed.error)
     const d = parsed.data
 
     let logoName = null
@@ -384,13 +392,14 @@ const getProfileProgress = async (customerId) => {
 }
 
 const getProfileError = async (customer) => {
-    if (customer.customerType !== '1') return null
+    if (!isSalonPartner(customer)) return null
 
-    const { membership, salonAdd } = await getProfileProgress(customer.customerId)
+    const progress = await getProfileProgress(customer.customerId)
+    const currentStep = getCurrentStep({ status: customer.status, ...progress })
 
-    if (membership && salonAdd) return null
+    if (currentStep === ONBOARDING_COMPLETE_STEP) return null
 
-    return { status: 200, message: 'Please complete your profile first.' }
+    return { status: 200, message: 'Please complete your profile first.', currentStep }
 }
 
 const loginWithPassword = async (res, email, password) => {
@@ -540,10 +549,7 @@ const accountStatus = async (req, res) => {
 
         const { membership, salonAdd } = await getProfileProgress(customer.customerId)
 
-        const currentStep = customer.status !== '1' ? 2
-            : !membership ? 3
-                : !salonAdd ? 4
-                    : 5
+        const currentStep = getCurrentStep({ status: customer.status, membership, salonAdd })
 
         return res.status(200).json({
             success: true,

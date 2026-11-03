@@ -1,4 +1,5 @@
 const { z } = require('zod')
+const { sendValidationError } = require('../utils/validationError')
 const authModel = require('../models/auth.model')
 const addressModel = require('../models/address.model')
 const membershipModel = require('../models/membership.model')
@@ -71,13 +72,6 @@ const toAddressColumns = (d) => ({
     zipcode: d.pinCode,
     country: d.country,
 })
-
-const sendValidationError = (res, error) =>
-    res.status(200).json({
-        success: false,
-        message: 'Validation failed',
-        errors: error.issues.map((i) => ({ field: i.path.join('.'), message: i.message })),
-    })
 
 const formatOrderAddress = ({ address, location, pinCode, country }) =>
     [address, [location, pinCode].filter(Boolean).join(' - '), country].filter(Boolean).join(', ')

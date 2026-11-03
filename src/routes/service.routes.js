@@ -13,7 +13,7 @@ const servicePayload = parsePayload(SERVICE_IMAGES, { emptyAsNull: ['price'] })
 
 router.post('/add', jwtAuthMiddleware, servicePayload, deviceAuthMiddleware, addService)
 router.post('/update', jwtAuthMiddleware, servicePayload, deviceAuthMiddleware, updateService)
-router.post('/list', parsePayload(), deviceAuthMiddleware, listServices)
+router.post('/list', jwtAuthMiddleware, parsePayload(), deviceAuthMiddleware, listServices)
 router.post('/status', jwtAuthMiddleware, parsePayload(), deviceAuthMiddleware, updateServiceStatus)
 
 module.exports = router

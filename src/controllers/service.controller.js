@@ -2,6 +2,7 @@ const fs = require('fs/promises')
 const path = require('path')
 const crypto = require('crypto')
 const { z } = require('zod')
+const { sendValidationError } = require('../utils/validationError')
 const env = require('../config/env')
 const authModel = require('../models/auth.model')
 const categoryModel = require('../models/category.model')
@@ -99,13 +100,6 @@ const listServicesSchema = z.object({
     serviceId: z.coerce.number({ error: 'Service ID must be a number' }).int().positive('Service ID must be a number').optional(),
     categoryId: z.coerce.number({ error: 'Category ID must be a number' }).int().positive('Category ID must be a number').optional(),
 }).strict()
-
-const sendValidationError = (res, error) =>
-    res.status(200).json({
-        success: false,
-        message: 'Validation failed',
-        errors: error.issues.map((i) => ({ field: i.path.join('.'), message: i.message })),
-    })
 
 // Services are only for Salon Partners (customer_type 1)
 const findSalonPartner = async (req, res, data) => {

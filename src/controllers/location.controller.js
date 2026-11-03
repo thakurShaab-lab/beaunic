@@ -1,4 +1,5 @@
 const { z } = require('zod')
+const { sendValidationError } = require('../utils/validationError')
 const locationModel = require('../models/location.model')
 const addressModel = require('../models/address.model')
 const authModel = require('../models/auth.model')
@@ -33,13 +34,6 @@ const saveLocationSchema = z.object({
     state: optionalText(50),
     pinCode: z.string().trim().regex(/^\d{6}$/, 'Must be a 6-digit PIN code').optional(),
 }).strict()
-
-const sendValidationError = (res, error) =>
-    res.status(200).json({
-        success: false,
-        message: 'Validation failed',
-        errors: error.issues.map((i) => ({ field: i.path.join('.'), message: i.message })),
-    })
 
 // wl_cities titles carry a state hint, e.g. "Ghazipur (UP)" - show just "Ghazipur"
 const cityLabel = (title) => (title ? title.replace(/\s*\(.*?\)\s*/g, ' ').trim() : null)

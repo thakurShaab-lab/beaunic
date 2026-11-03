@@ -1,5 +1,6 @@
 const crypto = require('crypto')
 const { z } = require('zod')
+const { sendValidationError } = require('../utils/validationError')
 const authModel = require('../models/auth.model')
 const membershipModel = require('../models/membership.model')
 const { validateRequestDevice } = require('./device&app.controller')
@@ -17,13 +18,6 @@ const purchaseMembershipSchema = z.object({
     ...deviceFields,
     membershipId: z.coerce.number().int().positive('Membership ID is required'),
 }).strict()
-
-const sendValidationError = (res, error) =>
-    res.status(200).json({
-        success: false,
-        message: 'Validation failed',
-        errors: error.issues.map((i) => ({ field: i.path.join('.'), message: i.message })),
-    })
 
 const isFreePlan = (plan) => plan.isCost === 0 || plan.price === 0
 

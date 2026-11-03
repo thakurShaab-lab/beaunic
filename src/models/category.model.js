@@ -1,21 +1,21 @@
 const { eq, and, asc, count, sql } = require("drizzle-orm")
 const db = require("../config/drizzle")
 const { wlCategories } = require("../schema/wl-categories")
-const { wlPackages } = require("../schema/wl-packages")
+const { wlServices } = require("../schema/wl-services")
 
-// wl_categories.status / wl_packages.status: 1=active, 0=inactive, 2=deleted
-// Every active category is listed, with 0 services when it has no active packages
+// wl_categories.status / wl_services.status: 1=active, 0=inactive, 2=deleted
+// Every active category is listed, with the number of active services in it (0 when none)
 const findActiveCategoriesWithServiceCount = async () =>
     db
         .select({
             categoryId: wlCategories.categoryId,
             categoryName: wlCategories.categoryName,
-            serviceCount: count(wlPackages.packageId),
+            serviceCount: count(wlServices.serviceId),
         })
         .from(wlCategories)
         .leftJoin(
-            wlPackages,
-            and(eq(wlPackages.categoryId, wlCategories.categoryId), eq(wlPackages.status, "1"))
+            wlServices,
+            and(eq(wlServices.categoryId, wlCategories.categoryId), eq(wlServices.status, "1"))
         )
         .where(eq(wlCategories.status, "1"))
         .groupBy(wlCategories.categoryId, wlCategories.categoryName, wlCategories.sortOrder)

@@ -2,6 +2,7 @@ const fs = require('fs/promises')
 const path = require('path')
 const crypto = require('crypto')
 const { z } = require('zod')
+const { sendValidationError } = require('../utils/validationError')
 const bcrypt = require('bcryptjs')
 const env = require('../config/env')
 const authModel = require('../models/auth.model')
@@ -57,13 +58,6 @@ const changePasswordSchema = z
         if (d.newPassword === d.currentPassword) {
             ctx.addIssue({ code: 'custom', path: ['newPassword'], message: 'New password must be different from the current password' })
         }
-    })
-
-const sendValidationError = (res, error) =>
-    res.status(200).json({
-        success: false,
-        message: 'Validation failed',
-        errors: error.issues.map((i) => ({ field: i.path.join('.'), message: i.message })),
     })
 
 const findLoggedInCustomer = async (req, res, { app_id, device_id }) => {

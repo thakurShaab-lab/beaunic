@@ -1,4 +1,5 @@
 const { z } = require('zod')
+const { sendValidationError } = require('../utils/validationError')
 const supportModel = require('../models/support.model')
 const { validateRequestDevice } = require('./device&app.controller')
 const { convertNulls } = require('../utils/convertNulls')
@@ -9,13 +10,6 @@ const supportSchema = z.object({
     app_id: z.union([z.string(), z.number()]),
     device_id: z.string().trim().min(1, 'Device ID is required'),
 }).strict()
-
-const sendValidationError = (res, error) =>
-    res.status(200).json({
-        success: false,
-        message: 'Validation failed',
-        errors: error.issues.map((i) => ({ field: i.path.join('.'), message: i.message })),
-    })
 
 const clean = (value) => (typeof value === 'string' && value.trim() ? value.trim() : null)
 
