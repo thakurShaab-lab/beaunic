@@ -155,7 +155,7 @@ const purchaseMembership = async (req, res) => {
             membership_status: '1',
         })
 
-        return res.status(201).json({
+        return res.status(200).json({
             success: true,
             message: 'Membership activated successfully',
             data: convertNulls({

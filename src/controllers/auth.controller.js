@@ -247,8 +247,11 @@ const registerFailedAttempt = async (res, customer, message) => {
     })
 }
 
-const completeLogin = async (res, customer) => {
-    await authModel.recordSuccessfulLogin(customer.customerId, customer.currentLogin)
+// app_id / device_id from the login request, as stored in wl_customers
+const loginDevice = ({ app_id, device_id }) => ({ appId: String(app_id).trim(), deviceId: device_id })
+
+const completeLogin = async (res, customer, device) => {
+    await authModel.recordSuccessfulLogin(customer.customerId, customer.currentLogin, device)
 
     return res.status(200).json({
     success: true,
@@ -360,7 +363,7 @@ const register = async (req, res) => {
             ipAddress: req.ip,
         })
 
-        return res.status(201).json({
+        return res.status(200).json({
             success: true,
             message: 'Registration successful',
             data: { customerId },
@@ -402,7 +405,7 @@ const getProfileError = async (customer) => {
     return { status: 200, message: 'Please complete your profile first.', currentStep }
 }
 
-const loginWithPassword = async (res, email, password) => {
+const loginWithPassword = async (res, email, password, device) => {
     const customer = await authModel.findByEmail(email)
     if (!customer) {
         return res.status(200).json({ success: false, message: 'Invalid email or password.' })
@@ -428,7 +431,7 @@ const loginWithPassword = async (res, email, password) => {
     const profileError = await getProfileError(customer)
     if (profileError) return sendError(res, profileError)
 
-    return completeLogin(res, customer)
+    return completeLogin(res, customer, device)
 }
 
 const loginWithMobile = async (res, mobileNumber) => {
@@ -455,7 +458,7 @@ const login = async (req, res) => {
         if (/^\d{10}$/.test(emailOrMobile)) {
             return await loginWithMobile(res, emailOrMobile)
         }
-        return await loginWithPassword(res, emailOrMobile.toLowerCase(), password)
+        return await loginWithPassword(res, emailOrMobile.toLowerCase(), password, loginDevice(parsed.data))
     } catch (err) {
         console.error('Login error:', err)
         return res.status(200).json({ success: false, message: 'Something went wrong' })
@@ -491,7 +494,7 @@ const verifyOtp = async (req, res) => {
             return registerFailedAttempt(res, customer, 'Invalid OTP.')
         }
 
-        return completeLogin(res, customer)
+        return completeLogin(res, customer, loginDevice(parsed.data))
     } catch (err) {
         console.error('OTP verification error:', err)
         return res.status(200).json({ success: false, message: 'Something went wrong' })

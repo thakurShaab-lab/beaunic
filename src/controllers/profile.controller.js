@@ -62,7 +62,7 @@ const changePasswordSchema = z
 
 const findLoggedInCustomer = async (req, res, { app_id, device_id }) => {
     const customer = await authModel.findByIdAndDevice(req.user.customerId, String(app_id).trim(), device_id)
-    console.log('Logged in customer:', customer)
+
     if (!customer) {
         res.status(200).json({ success: false, message: 'Account not found for this device.' })
         return null
@@ -114,6 +114,8 @@ const buildProfile = async (customerId) => {
         customerId: customer.customerId,
         customerType: customer.customerType,
         logoUrl: customer.customerPhoto ? `${env.staticFileBaseUrl}/salon_logos/${customer.customerPhoto}` : null,
+        bookings: '5',
+        favorites: '4',
         salonName: customer.salonName,
         ownerName: customer.firstName,
         serviceType: customer.serviceType,

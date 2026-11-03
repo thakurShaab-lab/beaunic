@@ -18,6 +18,9 @@ const supportRoutes = require('./src/routes/support.routes')
 const locationRoutes = require('./src/routes/location.routes')
 const categoryRoutes = require('./src/routes/category.routes')
 const serviceRoutes = require('./src/routes/service.routes')
+const cmsRoutes = require('./src/routes/cms.routes')
+const reviewRoutes = require('./src/routes/review.routes')
+const complaintRoutes = require('./src/routes/complaint.routes')
 
 
 const app = express()
@@ -117,6 +120,9 @@ app.use('/api/support', supportRoutes)
 app.use('/api/location', locationRoutes)
 app.use('/api/category', categoryRoutes)
 app.use('/api/service', serviceRoutes)
+app.use('/api/cms', cmsRoutes)
+app.use('/api/review', reviewRoutes)
+app.use('/api/complaint', complaintRoutes)
 
 
 const server = app.listen(env.port, '127.0.0.1', () => {

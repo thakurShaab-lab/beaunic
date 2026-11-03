@@ -1,6 +1,8 @@
 const { eq, and, ne, inArray, asc, desc, sql } = require("drizzle-orm")
+const { alias } = require("drizzle-orm/mysql-core")
 const db = require("../config/drizzle")
 const { wlServices } = require("../schema/wl-services")
+const { wlCustomers } = require("../schema/wl-customers")
 const { wlServicesMedia } = require("../schema/wl-services-media")
 const { wlCategories } = require("../schema/wl-categories")
 
@@ -125,7 +127,42 @@ const updateServiceStatus = async (serviceId, status, now) => {
         .where(eq(wlServices.serviceId, serviceId))
 }
 
+// The Salon Partner offering a service
+const salon = alias(wlCustomers, "salon")
+
+// The category a service's category sits under (wl_categories.parent_id), if any
+const parentCategory = alias(wlCategories, "parent_category")
+
+// An active service with its category and salon, for the Service Details page
+const findActiveServiceWithSalon = async (serviceId) => {
+    const rows = await db
+        .select({
+            serviceId: wlServices.serviceId,
+            customerId: wlServices.customerId,
+            categoryId: wlServices.categoryId,
+            categoryName: wlCategories.categoryName,
+            parentCategoryId: parentCategory.categoryId,
+            parentCategoryName: parentCategory.categoryName,
+            serviceName: wlServices.serviceName,
+            serviceDescription: wlServices.serviceDescription,
+            servicePrice: wlServices.servicePrice,
+            salonName: salon.salonName,
+            salonType: salon.serviceType,
+            salonCustomerType: salon.customerType,
+            salonStatus: salon.status,
+        })
+        .from(wlServices)
+        .leftJoin(wlCategories, eq(wlCategories.categoryId, wlServices.categoryId))
+        .leftJoin(parentCategory, eq(parentCategory.categoryId, wlCategories.parentId))
+        .leftJoin(salon, eq(salon.customerId, wlServices.customerId))
+        .where(and(eq(wlServices.serviceId, serviceId), eq(wlServices.status, "1")))
+        .limit(1)
+
+    return rows[0] || null
+}
+
 module.exports = {
+    findActiveServiceWithSalon,
     updateServiceStatus,
     findCustomerService,
     findCustomerServicesWithCategory,

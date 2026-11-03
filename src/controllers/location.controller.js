@@ -13,9 +13,17 @@ const SEARCH_LIMIT = 20
 const deviceFields = {
     app_id: z.union([z.string(), z.number()]),
     device_id: z.string().trim().min(1, 'Device ID is required'),
+    location_id: z.union([z.string(), z.number()]).optional().default(''),
 }
 
-const locationsSchema = z.object(deviceFields).strict()
+const locationIdFilter = z.coerce.number({ error: 'Location ID must be a number' }).int().positive('Location ID must be a number').optional()
+
+// locationId is optional: blank, null or missing lists every location. location_id is accepted too.
+const locationsSchema = z.object({
+    ...deviceFields,
+    locationId: locationIdFilter,
+    location_id: locationIdFilter,
+}).strict()
 
 const latitude = z.coerce.number({ error: 'Latitude must be a number' })
     .min(-90, 'Latitude must be between -90 and 90').max(90, 'Latitude must be between -90 and 90')
@@ -87,16 +95,44 @@ const getLocations = async (req, res) => {
     if (!parsed.success) return sendValidationError(res, parsed.error)
 
     try {
+        const locationId = parsed.data.locationId ?? parsed.data.location_id
+
+        // One location by ID
+        if (locationId !== undefined) {
+            const location = await locationModel.findActiveLocationById(locationId)
+
+            if (!location) {
+                return res.status(200).json({
+                    success: false,
+                    message: 'Service location not found or not available.',
+                })
+            }
+
+            return res.status(200).json({
+                success: true,
+                message: 'Location fetched successfully',
+                data: convertNulls({ location: formatLocation(location) }),
+            })
+        }
+
         const rows = await locationModel.findActiveLocations()
 
         return res.status(200).json({
             success: true,
-            message: rows.length ? 'Locations fetched successfully' : 'No locations available',
-            data: convertNulls({ locations: rows.map(formatLocation) }),
+            message: rows.length
+                ? 'Locations fetched successfully'
+                : 'No locations available',
+            data: convertNulls({
+                locations: rows.map(formatLocation),
+            }),
         })
     } catch (err) {
         console.error('Get locations error:', err)
-        return res.status(200).json({ success: false, message: 'Something went wrong' })
+
+        return res.status(200).json({
+            success: false,
+            message: 'Something went wrong',
+        })
     }
 }
 

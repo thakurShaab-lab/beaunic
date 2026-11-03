@@ -8,11 +8,14 @@ const authModel = require('../models/auth.model')
 const categoryModel = require('../models/category.model')
 const serviceModel = require('../models/service.model')
 const membershipModel = require('../models/membership.model')
+const reviewModel = require('../models/review.model')
+const addressModel = require('../models/address.model')
 const { validateRequestDevice } = require('./device&app.controller')
 const { detectImageExt } = require('./auth.controller')
 const { findLoggedInCustomer } = require('./profile.controller')
 const { noMarkup } = require('./address.controller')
 const { convertNulls } = require('../utils/convertNulls')
+const { formatDate } = require('../utils/formatDate')
 
 const SERVICE_IMAGE_FOLDER = 'services'
 // UPLOAD_DIR is the folder served at /uploaded_files, so images are saved straight under it
@@ -442,4 +445,167 @@ const updateServiceStatus = async (req, res) => {
     }
 }
 
-module.exports = { addService, updateService, listServices, updateServiceStatus }
+// Service Details page. serviceId / salonId (service_id / salon_id also accepted) are both required.
+const serviceIdField = z.coerce.number({ error: 'Service ID is required' }).int().positive('Service ID is required')
+const salonIdField = z.coerce.number({ error: 'Salon ID is required' }).int().positive('Salon ID is required')
+
+const serviceDetailsSchema = z.object({
+    ...deviceFields,
+    serviceId: serviceIdField.optional(),
+    service_id: serviceIdField.optional(),
+    salonId: salonIdField.optional(),
+    salon_id: salonIdField.optional(),
+}).strict().superRefine((d, ctx) => {
+    if (d.serviceId === undefined && d.service_id === undefined) {
+        ctx.addIssue({ code: 'custom', path: ['serviceId'], message: 'Service ID is required' })
+    }
+    if (d.salonId === undefined && d.salon_id === undefined) {
+        ctx.addIssue({ code: 'custom', path: ['salonId'], message: 'Salon ID is required' })
+    }
+})
+
+// wl_customers.salon_type of the salon offering the service
+const SERVICE_TYPES = {
+    salon: { key: 'salon', label: 'Salon Service' },
+    home_service: { key: 'home_service', label: 'Home Service' },
+}
+
+// Shown under "Nearby Salons"; fixed for now, not read from the database
+const NEARBY_SALONS = [
+    { salonName: 'Beaunic Salon Academy', address: 'Main Market, Dildarnagar', distance: '0.8 km', rating: 4.9 },
+    { salonName: 'Aura Unisex Salon', address: 'Station Road, Dildarnagar', distance: '1.2 km', rating: 4.7 },
+    { salonName: 'Glow Studio', address: 'Zamania Road, Zamania', distance: '3.4 km', rating: 4.5 },
+]
+
+// 1299 -> "₹1,299", 1299.5 -> "₹1,299.50"
+const rupees = (value) =>
+    `₹${Number(value).toLocaleString('en-IN', { minimumFractionDigits: Number.isInteger(Number(value)) ? 0 : 2, maximumFractionDigits: 2 })}`
+
+// 2600 -> "2.6k"
+const shortCount = (value) => (value >= 1000 ? `${Number((value / 1000).toFixed(1))}k` : String(value))
+
+const profilePhotoUrl = (name) => (name ? `${env.staticFileBaseUrl}/salon_logos/${name}` : null)
+
+// The description is what the partner typed in "What does this service include?", one item per line
+const includedItems = (description) =>
+    (description || '').split(/\r?\n/).map((line) => line.replace(/^\s*[-•*✓]\s*/, '').trim()).filter(Boolean)
+
+const buildSalonLocation = (salonId, salonName, address) => {
+    const parts = address ? [address.address, address.city, address.state].map((part) => part && part.trim()).filter(Boolean) : []
+    const fullAddress = parts.length ? `${parts.join(', ')}${address.zipcode ? ` ${address.zipcode.trim()}` : ''}` : null
+
+    return {
+        salonId,
+        salonName,
+        address: address ? address.address : null,
+        city: address ? address.city : null,
+        state: address ? address.state : null,
+        pinCode: address ? address.zipcode : null,
+        fullAddress,
+        mapLink: fullAddress
+            ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent([salonName, fullAddress].filter(Boolean).join(', '))}`
+            : null,
+    }
+}
+
+const getServiceDetails = async (req, res) => {
+    if (!(await validateRequestDevice(req, res))) return
+
+    const parsed = serviceDetailsSchema.safeParse(req.body)
+
+    if (!parsed.success) return sendValidationError(res, parsed.error)
+
+    const serviceId = parsed.data.serviceId ?? parsed.data.service_id
+    const salonId = parsed.data.salonId ?? parsed.data.salon_id
+
+    try {
+        const customer = await findLoggedInCustomer(req, res, parsed.data)
+        if (!customer) return
+
+        const service = await serviceModel.findActiveServiceWithSalon(serviceId)
+        if (!service) {
+            return res.status(200).json({ success: false, message: 'Service not found.' })
+        }
+
+        if (service.customerId !== salonId) {
+            return res.status(200).json({ success: false, message: 'This service is not offered by the selected salon.' })
+        }
+
+        if (service.salonCustomerType !== '1' || service.salonStatus !== '1') {
+            return res.status(200).json({ success: false, message: 'This salon is not available right now.' })
+        }
+
+        const [media, summary, reviews, address] = await Promise.all([
+            serviceModel.findServiceMedia(serviceId),
+            reviewModel.findServiceRatingSummary(serviceId, salonId),
+            reviewModel.findServiceReviews(serviceId, salonId),
+            addressModel.findDefaultAddress(salonId),
+        ])
+
+        const totalReviews = Number(summary?.totalReviews || 0)
+        const averageRating = totalReviews ? Number(Number(summary.averageRating).toFixed(1)) : 0
+        const ratingSummary = { averageRating, totalReviews, totalReviewsLabel: shortCount(totalReviews) }
+        const serviceType = SERVICE_TYPES[service.salonType] || null
+        const price = service.servicePrice !== null ? Number(service.servicePrice) : null
+
+        return res.status(200).json({
+            success: true,
+            message: 'Service details fetched successfully',
+            data: convertNulls({
+                // 1. Images
+                images: media.map((row) => ({ mediaId: row.mediaId, url: imageUrl(row.media), isCover: row.isDefault === 'Y' })),
+                // 2. Service type
+                serviceType,
+                // 3. Category; label is "Parent · Category" when the category has a parent
+                category: {
+                    categoryId: service.categoryId || null,
+                    categoryName: service.categoryName,
+                    parentCategoryId: service.parentCategoryId,
+                    parentCategoryName: service.parentCategoryName,
+                    label: [service.parentCategoryName, service.categoryName].filter(Boolean).join(' · ') || null,
+                },
+                // 4. Title
+                serviceId: service.serviceId,
+                title: service.serviceName,
+                categoryName: service.categoryName,
+                // 5. Ratings & reviews summary
+                ratingSummary,
+                // 6. Price & duration
+                pricing: {
+                    price,
+                    priceLabel: price !== null ? rupees(price) : 'Price not set',
+                    // wl_services has no duration yet
+                    duration: null,
+                    durationLabel: null,
+                    serviceType: serviceType ? serviceType.label : null,
+                },
+                // 7. Description
+                description: service.serviceDescription,
+                // 8. What's included
+                whatsIncluded: includedItems(service.serviceDescription),
+                // 9. Nearby salons
+                nearbySalons: NEARBY_SALONS,
+                // 10. Salon location
+                salonLocation: buildSalonLocation(salonId, service.salonName, address),
+                // 11. Reviews
+                reviews: {
+                    ...ratingSummary,
+                    items: reviews.map((review) => ({
+                        reviewId: review.reviewId,
+                        customerName: [review.firstName, review.lastName].filter(Boolean).join(' ').trim() || null,
+                        profileImage: profilePhotoUrl(review.customerPhoto),
+                        rating: Number(review.rating),
+                        review: review.reviewText,
+                        reviewDate: formatDate(review.reviewAddedDate),
+                        reviewAddedDate: review.reviewAddedDate,
+                    })),
+                },
+            }),
+        })
+    } catch (err) {
+        console.error('Service details error:', err)
+        return res.status(200).json({ success: false, message: 'Something went wrong' })
+    }
+}
+
+module.exports = { addService, updateService, listServices, updateServiceStatus, getServiceDetails }

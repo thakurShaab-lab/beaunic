@@ -142,7 +142,8 @@ const recordFailedLogin = async (customerId, numberOfLoginTry, block) => {
         .where(eq(wlCustomers.customerId, customerId))
 }
 
-const recordSuccessfulLogin = async (customerId, previousLogin) => {
+// device: { appId, deviceId } of the phone used to log in, saved so later requests from it match this account
+const recordSuccessfulLogin = async (customerId, previousLogin, device) => {
     await db
         .update(wlCustomers)
         .set({
@@ -150,6 +151,8 @@ const recordSuccessfulLogin = async (customerId, previousLogin) => {
             isBlocked: "0",
             lastLoginDate: previousLogin,
             currentLogin: nowString(),
+            appId: device.appId,
+            deviceId: device.deviceId,
         })
         .where(eq(wlCustomers.customerId, customerId))
 }
