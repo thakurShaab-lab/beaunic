@@ -250,8 +250,7 @@ const registerFailedAttempt = async (res, customer, message) => {
 // app_id / device_id from the login request, as stored in wl_customers
 const loginDevice = ({ app_id, device_id }) => ({ appId: String(app_id).trim(), deviceId: device_id })
 
-// Login stopped with success: false (pending approval, incomplete profile, ...), but the phone is still
-// saved so the follow-up APIs (onboarding steps, account-status) work from this device
+
 const sendErrorWithDevice = async (res, customer, device, error) => {
     if (device) await authModel.updateLoginDevice(customer.customerId, device)
     return sendError(res, error)

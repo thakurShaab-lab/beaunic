@@ -10,6 +10,7 @@ const serviceModel = require('../models/service.model')
 const membershipModel = require('../models/membership.model')
 const reviewModel = require('../models/review.model')
 const addressModel = require('../models/address.model')
+const complaintModel = require('../models/complaint.model')
 const { validateRequestDevice } = require('./device&app.controller')
 const { detectImageExt } = require('./auth.controller')
 const { findLoggedInCustomer } = require('./profile.controller')
@@ -122,6 +123,8 @@ const lettersAndDigits = (value) => (typeof value === 'string' ? value.toLowerCa
 // Every filter is optional: blank, null or missing means "don't filter by it"
 const listServicesSchema = z.object({
     ...deviceFields,
+    // User only: one salon's services; unset lists every active salon's. A Salon Partner always gets their own.
+    salonId: z.coerce.number({ error: 'Salon ID must be a number' }).int().positive('Salon ID must be a number').optional(),
     serviceId: z.coerce.number({ error: 'Service ID must be a number' }).int().positive('Service ID must be a number').optional(),
     categoryId: z.coerce.number({ error: 'Category ID must be a number' }).int().positive('Category ID must be a number').optional(),
     priceRange: z.preprocess(
@@ -419,11 +422,21 @@ const listServices = async (req, res) => {
     const isFiltered = Boolean(priceRange) || Boolean(serviceName) || minRating !== undefined
 
     try {
-        const customer = await findSalonPartner(req, res, parsed.data)
+        const customer = await findLoggedInCustomer(req, res, parsed.data)
         if (!customer) return
 
+        // A Salon Partner sees their own services (active and inactive); a User sees active services of
+        // active salons: one salon's when salonId is sent, otherwise every salon's
+        const isUser = customer.customerType !== '1'
+        const salonId = isUser ? parsed.data.salonId : customer.customerId
+
+        if (isUser && salonId !== undefined && !(await complaintModel.findActiveSalon(salonId))) {
+            return res.status(200).json({ success: false, message: 'Salon not found.' })
+        }
+
         const [services, membership] = await Promise.all([
-            serviceModel.findCustomerServicesWithCategory(customer.customerId, {
+            serviceModel.findCustomerServicesWithCategory(salonId, {
+                activeOnly: isUser,
                 serviceId,
                 categoryId,
                 minPrice: priceRange?.minPrice,
@@ -433,7 +446,8 @@ const listServices = async (req, res) => {
                 minRating,
                 sortBy,
             }),
-            membershipModel.findActiveMembership(customer.customerId),
+            // The membership badge is the partner's own; a User doesn't see it
+            isUser ? null : membershipModel.findActiveMembership(customer.customerId),
         ])
 
         if (serviceId !== undefined && !services.length) {
@@ -451,6 +465,8 @@ const listServices = async (req, res) => {
             ),
             averageRating: Number(Number(service.averageRating).toFixed(1)),
             reviewCount: service.reviewCount,
+            // A User's list can mix salons, so each service says whose it is (needed for /service/details)
+            ...(isUser && { salonId: service.customerId, salonName: service.salonName }),
         }))
 
         if (serviceId !== undefined) {
@@ -466,7 +482,8 @@ const listServices = async (req, res) => {
             message: formatted.length
                 ? 'Services fetched successfully'
                 : isFiltered ? 'No services match these filters'
-                    : categoryId !== undefined ? 'No services found in this category' : 'No services added yet',
+                    : categoryId !== undefined ? 'No services found in this category'
+                        : isUser ? 'No services found' : 'No services added yet',
             data: convertNulls({
                 total: formatted.length,
                 // What was applied, so the sheets can show the selected chips

@@ -1,4 +1,4 @@
-const { eq, and, ne, inArray, asc, desc, sql, gte, lt, lte, like } = require("drizzle-orm")
+const { eq, and, ne, inArray, asc, desc, sql, gte, lt, lte, like, isNotNull } = require("drizzle-orm")
 const { alias } = require("drizzle-orm/mysql-core")
 const db = require("../config/drizzle")
 const { wlServices } = require("../schema/wl-services")
@@ -55,15 +55,29 @@ const SERVICE_SORTS = {
     nearest: [],
 }
 
-// A partner's services with their category name and rating, deleted ones left out. Every filter is optional:
+// The Salon Partner offering a service
+const salon = alias(wlCustomers, "salon")
+
+// What a User may see: active services of active salons
+const visibleToUsers = and(
+    eq(wlServices.status, "1"),
+    eq(salon.customerType, "1"),
+    eq(salon.status, "1"),
+    isNotNull(salon.salonName)
+)
+
+// Services with their category name, salon and rating. Every filter is optional:
+// customerId (one salon's services; unset = every salon, only with activeOnly),
+// activeOnly (a User's view: active services of active salons; otherwise inactive ones show, deleted never do),
 // serviceId, categoryId, minPrice / maxPrice (maxPriceExclusive makes the upper bound "under"),
 // serviceName (part of the name, any case), minRating (average stars), sortBy (a SERVICE_SORTS key; newest first when unset).
 const findCustomerServicesWithCategory = async (
     customerId,
-    { serviceId, categoryId, minPrice, maxPrice, maxPriceExclusive, serviceName, minRating, sortBy } = {}
+    { activeOnly = false, serviceId, categoryId, minPrice, maxPrice, maxPriceExclusive, serviceName, minRating, sortBy } = {}
 ) =>
     db
         .select({
+            salonName: salon.salonName,
             serviceId: wlServices.serviceId,
             customerId: wlServices.customerId,
             membershipId: wlServices.membershipId,
@@ -81,10 +95,11 @@ const findCustomerServicesWithCategory = async (
         .from(wlServices)
         .leftJoin(wlCategories, eq(wlCategories.categoryId, wlServices.categoryId))
         .leftJoin(serviceRatings, eq(serviceRatings.serviceId, wlServices.serviceId))
+        .leftJoin(salon, eq(salon.customerId, wlServices.customerId))
         .where(
             and(
-                eq(wlServices.customerId, customerId),
-                ne(wlServices.status, "2"),
+                customerId !== undefined ? eq(wlServices.customerId, customerId) : undefined,
+                activeOnly ? visibleToUsers : ne(wlServices.status, "2"),
                 serviceId !== undefined ? eq(wlServices.serviceId, serviceId) : undefined,
                 categoryId !== undefined ? eq(wlServices.categoryId, categoryId) : undefined,
                 minPrice !== undefined ? gte(wlServices.servicePrice, String(minPrice)) : undefined,
@@ -171,9 +186,6 @@ const updateServiceStatus = async (serviceId, status, now) => {
         .set({ status, serviceUpdatedDate: now })
         .where(eq(wlServices.serviceId, serviceId))
 }
-
-// The Salon Partner offering a service
-const salon = alias(wlCustomers, "salon")
 
 // The category a service's category sits under (wl_categories.parent_id), if any
 const parentCategory = alias(wlCategories, "parent_category")

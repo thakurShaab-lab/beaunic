@@ -5,11 +5,15 @@ const { wlBookingSlots } = require("../schema/wl-booking-slots")
 // wl_booking_slots.status: 1=Active, 0=Inactive, 2=Deleted; a partner can only reach their own slots
 const ownSlots = (customerId) => and(eq(wlBookingSlots.customerId, customerId), ne(wlBookingSlots.status, "2"))
 
-const findCustomerSlot = async (customerId, slotId) => {
+// activeOnly: a User viewing a salon's slots sees only active ones (status 1); the partner also sees inactive ones
+const salonSlots = (customerId, activeOnly) =>
+    activeOnly ? and(eq(wlBookingSlots.customerId, customerId), eq(wlBookingSlots.status, "1")) : ownSlots(customerId)
+
+const findCustomerSlot = async (customerId, slotId, { activeOnly = false } = {}) => {
     const rows = await db
         .select()
         .from(wlBookingSlots)
-        .where(and(ownSlots(customerId), eq(wlBookingSlots.slotId, slotId)))
+        .where(and(salonSlots(customerId, activeOnly), eq(wlBookingSlots.slotId, slotId)))
         .limit(1)
 
     return rows[0] || null
@@ -17,13 +21,13 @@ const findCustomerSlot = async (customerId, slotId) => {
 
 // A partner's slots by date, then start time.
 // Optional filters: slotDate (one day) and fromDate (that day onwards); unset ones are ignored.
-const findCustomerSlots = async (customerId, { slotDate, fromDate } = {}) =>
+const findCustomerSlots = async (customerId, { slotDate, fromDate, activeOnly = false } = {}) =>
     db
         .select()
         .from(wlBookingSlots)
         .where(
             and(
-                ownSlots(customerId),
+                salonSlots(customerId, activeOnly),
                 slotDate !== undefined ? eq(wlBookingSlots.slotDate, slotDate) : undefined,
                 fromDate !== undefined ? gte(wlBookingSlots.slotDate, fromDate) : undefined
             )
@@ -31,11 +35,11 @@ const findCustomerSlots = async (customerId, { slotDate, fromDate } = {}) =>
         .orderBy(asc(wlBookingSlots.slotDate), asc(wlBookingSlots.startTime))
 
 // Dates that have slots, for the date strip
-const countSlotsByDate = async (customerId, fromDate) =>
+const countSlotsByDate = async (customerId, fromDate, { activeOnly = false } = {}) =>
     db
         .select({ slotDate: wlBookingSlots.slotDate, total: count() })
         .from(wlBookingSlots)
-        .where(and(ownSlots(customerId), gte(wlBookingSlots.slotDate, fromDate)))
+        .where(and(salonSlots(customerId, activeOnly), gte(wlBookingSlots.slotDate, fromDate)))
         .groupBy(wlBookingSlots.slotDate)
         .orderBy(asc(wlBookingSlots.slotDate))
 

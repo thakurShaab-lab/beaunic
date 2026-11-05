@@ -2,6 +2,7 @@ const { z } = require('zod')
 const { sendValidationError } = require('../utils/validationError')
 const authModel = require('../models/auth.model')
 const slotModel = require('../models/slot.model')
+const complaintModel = require('../models/complaint.model')
 const { validateRequestDevice } = require('./device&app.controller')
 const { findLoggedInCustomer } = require('./profile.controller')
 const { convertNulls } = require('../utils/convertNulls')
@@ -92,9 +93,11 @@ const updateSlotSchema = z.object({
     maxBookings: maxBookings.optional(),
 }).strict()
 
-// Both filters are optional: no slotId lists slots; no slotDate means "All Dates" (today onwards)
+// Both filters are optional: no slotId lists slots; no slotDate means "All Dates" (today onwards).
+// salonId: required for a User (whose slots to show); a Salon Partner always sees their own, so it's ignored.
 const listSlotsSchema = z.object({
     ...deviceFields,
+    salonId: z.coerce.number({ error: 'Salon ID must be a number' }).int().positive('Salon ID must be a number').optional(),
     slotId: slotId.optional(),
     slotDate: slotDate().optional(),
 }).strict()
@@ -141,6 +144,13 @@ const availabilityOf = (slot) =>
 
 const AVAILABILITY_LABELS = { available: 'Available', booked: 'Booked', full: 'Full' }
 
+// statusCode / statusText: 1 Available (none booked), 2 Booked (some places booked), 3 Booked (every place booked)
+const SLOT_STATUSES = {
+    available: { statusCode: 1, statusText: 'Available' },
+    booked: { statusCode: 2, statusText: 'Booked' },
+    full: { statusCode: 3, statusText: 'Booked' },
+}
+
 const formatSlot = (slot) => {
     const availability = availabilityOf(slot)
 
@@ -161,6 +171,7 @@ const formatSlot = (slot) => {
         bookedPercent: Math.min(Math.round((slot.bookedCount / slot.maxBookings) * 100), 100),
         availability,
         availabilityLabel: AVAILABILITY_LABELS[availability],
+        ...SLOT_STATUSES[availability],
         // The Create Slot preview line
         previewLabel: `Up to ${slot.maxBookings} booking${slot.maxBookings === 1 ? '' : 's'} in this slot`,
     }
@@ -221,7 +232,30 @@ const createSlot = async (req, res) => {
     }
 }
 
-// "Manage Slots": slots grouped by day, plus the date strip; slotId gives one slot
+// Whose slots the list shows: a Salon Partner sees their own (active and inactive);
+// a User sees the active slots of the salon they send, from today onwards
+const findSlotOwner = async (req, res, data) => {
+    const customer = await findLoggedInCustomer(req, res, data)
+    if (!customer) return null
+
+    if (customer.customerType === '1') return { salonId: customer.customerId, salon: null, isUser: false }
+
+    if (data.salonId === undefined) {
+        res.status(200).json({ success: false, message: 'Salon ID is required', field: 'salonId' })
+        return null
+    }
+
+    const salon = await complaintModel.findActiveSalon(data.salonId)
+    if (!salon) {
+        res.status(200).json({ success: false, message: 'Salon not found.' })
+        return null
+    }
+
+    return { salonId: salon.salonId, salon, isUser: true }
+}
+
+// "Manage Slots" (Salon Partner) / a salon's slots (User): slots grouped by day, plus the date strip;
+// slotId gives one slot
 const listSlots = async (req, res) => {
     if (!(await validateRequestDevice(req, res))) return
 
@@ -232,24 +266,33 @@ const listSlots = async (req, res) => {
     const { slotId: id, slotDate: date } = parsed.data
 
     try {
-        const customer = await findSalonPartner(req, res, parsed.data)
-        if (!customer) return
+        const owner = await findSlotOwner(req, res, parsed.data)
+        if (!owner) return
+
+        const today = salonNow().date
+        const activeOnly = owner.isUser
+        // Shown to a User, so the app knows which salon the slots belong to
+        const salon = owner.salon && { salonId: owner.salon.salonId, salonName: owner.salon.salonName }
 
         if (id !== undefined) {
-            const slot = await slotModel.findCustomerSlot(customer.customerId, id)
-            if (!slot) return sendNotFound(res)
+            const slot = await slotModel.findCustomerSlot(owner.salonId, id, { activeOnly })
+            // A User can't open a past slot
+            if (!slot || (owner.isUser && slot.slotDate < today)) return sendNotFound(res)
 
             return res.status(200).json({
                 success: true,
                 message: 'Slot fetched successfully',
-                data: convertNulls({ slot: formatSlot(slot) }),
+                data: convertNulls({ ...(salon && { salon }), slot: formatSlot(slot) }),
             })
         }
 
-        const today = salonNow().date
+        // A User asking for a past day gets nothing
+        const pastDayForUser = owner.isUser && date !== undefined && date < today
         const [slots, dateCounts] = await Promise.all([
-            slotModel.findCustomerSlots(customer.customerId, date !== undefined ? { slotDate: date } : { fromDate: today }),
-            slotModel.countSlotsByDate(customer.customerId, today),
+            pastDayForUser
+                ? []
+                : slotModel.findCustomerSlots(owner.salonId, { ...(date !== undefined ? { slotDate: date } : { fromDate: today }), activeOnly }),
+            slotModel.countSlotsByDate(owner.salonId, today, { activeOnly }),
         ])
 
         const days = []
@@ -267,6 +310,7 @@ const listSlots = async (req, res) => {
             success: true,
             message: slots.length ? 'Slots fetched successfully' : 'No slots found',
             data: convertNulls({
+                ...(salon && { salon }),
                 total: slots.length,
                 // The date strip: every upcoming day that has slots
                 dates: dateCounts.map((row) => {
