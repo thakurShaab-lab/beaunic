@@ -7,7 +7,7 @@ const wlCustomers = mysqlTable("wl_customers", {
 	title: varchar({ length: 10 }),
 	firstName: varchar("first_name", { length: 32 }),
 	lastName: varchar("last_name", { length: 32 }),
-	gender: mysqlEnum(['Male', 'Female']).default('Male'),
+	gender: mysqlEnum(['Male', 'Female', 'Other']).default('Male'),
 	birthDate: date("birth_date", { mode: 'string' }),
 	customerPhoto: varchar("customer_photo", { length: 32 }),
 	phoneNumber: varchar("phone_number", { length: 32 }),

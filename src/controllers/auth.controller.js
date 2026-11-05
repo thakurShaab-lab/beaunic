@@ -14,7 +14,8 @@ const { convertNulls } = require('../utils/convertNulls')
 
 const noMarkup = (v) => !/[<>]/.test(v)
 
-const UPLOAD_DIR = path.join(__dirname, `${env.uploadDir}`, 'salon_logos')
+// UPLOAD_DIR is the folder served at /uploaded_files, so logos are saved straight under it
+const UPLOAD_DIR = path.join(env.uploadDir, 'salon_logos')
 
 const OTP_EXPIRY_MINUTES = 5
 const OTP_RESEND_COOLDOWN_SECONDS = 60

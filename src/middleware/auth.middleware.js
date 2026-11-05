@@ -1,8 +1,5 @@
-const db = require('../config/drizzle')
-const { eq, and } = require('drizzle-orm')
 const jwt = require('jsonwebtoken')
 const crypto = require('crypto')
-const { wlCustomers } = require('../schema/wl-customers')
 
 
 const jwtAuthMiddleware = (req, res, next) => {
@@ -46,8 +43,6 @@ const jwtAuthMiddleware = (req, res, next) => {
   }
 }
 
-const LOGIN_ROUTES = new Set(['/api/auth/login', '/api/auth/verify-otp', '/api/auth/resend-otp'])
-
 const deviceAuthMiddleware = async (req, res, next) => {
   try {
     const rawAppId = req.headers['x-app-id'] || req.body?.app_id
@@ -74,42 +69,8 @@ const deviceAuthMiddleware = async (req, res, next) => {
       })
     }
 
-    // Logging in is how a new phone gets saved to an account, so these routes only need app_id and device_id sent
-    if (LOGIN_ROUTES.has(req.baseUrl + req.path)) {
-      req.device = { id: null, app_id: appId.trim(), device_id: deviceId.trim(), app_type: appType }
-      return next()
-    }
-
-    const [customer] = await db
-      .select({
-        customersId: wlCustomers.customerId,
-        appId: wlCustomers.appId,
-        deviceId: wlCustomers.deviceId,
-        appType: wlCustomers.appType,
-      })
-      .from(wlCustomers)
-      .where(
-        and(
-          eq(wlCustomers.appId, appId.trim()),
-          eq(wlCustomers.deviceId, deviceId.trim()),
-          appType !== undefined ? eq(wlCustomers.appType, appType.trim()) : undefined,
-        )
-      )
-      .limit(1)
-
-    if (!customer) {
-      return res.status(200).json({
-        success: false,
-        message: 'Invalid app_id or device_id, or account is inactive.',
-      })
-    }
-
-    req.device = {
-      id: customer.customersId,
-      app_id: customer.appId,
-      device_id: customer.deviceId,
-      app_type: customer.appType,
-    }
+    // Only checks that app_id and device_id are sent; the phone doesn't have to be saved on an account yet
+    req.device = { app_id: appId.trim(), device_id: deviceId.trim(), app_type: appType }
 
     next()
   } catch (error) {
@@ -122,4 +83,4 @@ const deviceAuthMiddleware = async (req, res, next) => {
   }
 }
 
-module.exports = { deviceAuthMiddleware, jwtAuthMiddleware, LOGIN_ROUTES }
+module.exports = { deviceAuthMiddleware, jwtAuthMiddleware }

@@ -31,6 +31,7 @@ const PROFILE_FIELDS = {
         (value) => typeof value === 'string' && !value.trim() ? undefined : value,
         z.string().trim().min(2).max(32).regex(/^[\p{L}\p{M} .'-]+$/u, 'Invalid characters in name').optional()
     ),
+    gender: z.enum(['Male', 'Female']).optional(),
     serviceType: z.preprocess(
         (value) => value === '' ? undefined : value,
         z.enum(['salon', 'home_service']).optional()
@@ -116,6 +117,7 @@ const buildProfile = async (customerId) => {
         logoUrl: customer.customerPhoto ? `${env.staticFileBaseUrl}/salon_logos/${customer.customerPhoto}` : null,
         bookings: '5',
         favorites: '4',
+        notofications: '3',
         salonName: customer.salonName,
         ownerName: customer.firstName,
         serviceType: customer.serviceType,
