@@ -425,4 +425,4 @@ const deleteSlot = async (req, res) => {
     }
 }
 
-module.exports = { createSlot, listSlots, updateSlot, deleteSlot }
+module.exports = { createSlot, listSlots, updateSlot, deleteSlot, salonNow, timeLabel, dateParts, hhmm, formatSlot }
