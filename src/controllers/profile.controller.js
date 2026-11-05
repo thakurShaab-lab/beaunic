@@ -12,6 +12,7 @@ const { validateRequestDevice } = require('./device&app.controller')
 const { detectImageExt, UPLOAD_DIR } = require('./auth.controller')
 const { contactAndAddressFields, toAddressColumns, formatOrderAddress, optionalText } = require('./address.controller')
 const { convertNulls } = require('../utils/convertNulls')
+const { resolveMediaUrl } = require('../utils/mediaUrl')
 
 const SERVICE_TYPE_LABELS = {
     salon: 'Salon',
@@ -31,7 +32,11 @@ const PROFILE_FIELDS = {
         (value) => typeof value === 'string' && !value.trim() ? undefined : value,
         z.string().trim().min(2).max(32).regex(/^[\p{L}\p{M} .'-]+$/u, 'Invalid characters in name').optional()
     ),
-    gender: z.enum(['Male', 'Female']).optional(),
+    // wl_customers.gender; "male" / "FEMALE" are accepted too
+    gender: z.preprocess(
+        (value) => typeof value === 'string' ? value.trim().charAt(0).toUpperCase() + value.trim().slice(1).toLowerCase() : value,
+        z.enum(['Male', 'Female'], { error: 'Gender must be Male or Female' }).optional()
+    ),
     serviceType: z.preprocess(
         (value) => value === '' ? undefined : value,
         z.enum(['salon', 'home_service']).optional()
@@ -77,7 +82,7 @@ const findLoggedInCustomer = async (req, res, { app_id, device_id }) => {
     return customer
 }
 
-const buildProfile = async (customerId) => {
+const buildProfile = async (req, customerId) => {
     const [customer, savedAddress, membership] = await Promise.all([
         authModel.findProfile(customerId),
         addressModel.findDefaultAddress(customerId),
@@ -114,12 +119,14 @@ const buildProfile = async (customerId) => {
     return convertNulls({
         customerId: customer.customerId,
         customerType: customer.customerType,
-        logoUrl: customer.customerPhoto ? `${env.staticFileBaseUrl}/salon_logos/${customer.customerPhoto}` : null,
+        // null when the file is missing
+        logoUrl: await resolveMediaUrl(req, 'salon_logos', customer.customerPhoto, null, env.staticFileBaseUrl),
         bookings: '5',
         favorites: '4',
         notofications: '3',
         salonName: customer.salonName,
         ownerName: customer.firstName,
+        gender: customer.gender,
         serviceType: customer.serviceType,
         serviceTypeLabel: SERVICE_TYPE_LABELS[customer.serviceType] || null,
         emailId: customer.userName,
@@ -157,7 +164,7 @@ const getProfile = async (req, res) => {
         return res.status(200).json({
             success: true,
             message: 'Profile fetched successfully',
-            data: await buildProfile(customer.customerId),
+            data: await buildProfile(req, customer.customerId),
         })
     } catch (err) {
         console.error('Get profile error:', err)
@@ -185,6 +192,7 @@ const updateProfile = async (req, res) => {
 
     const customerValues = {
         firstName: d.name,
+        gender: d.gender,
         salonName: d.salonName,
         serviceType: d.serviceType,
         ...(logoName && { customerPhoto: logoName }),
@@ -252,7 +260,7 @@ const updateProfile = async (req, res) => {
         return res.status(200).json({
             success: true,
             message: 'Profile updated successfully',
-            data: await buildProfile(customer.customerId),
+            data: await buildProfile(req, customer.customerId),
         })
     } catch (err) {
         if (logoName) await fs.unlink(path.join(UPLOAD_DIR, logoName)).catch(() => { })

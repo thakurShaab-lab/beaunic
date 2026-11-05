@@ -16,6 +16,7 @@ const { findLoggedInCustomer } = require('./profile.controller')
 const { noMarkup } = require('./address.controller')
 const { convertNulls } = require('../utils/convertNulls')
 const { formatDate } = require('../utils/formatDate')
+const { resolveMediaUrl } = require('../utils/mediaUrl')
 
 const SERVICE_IMAGE_FOLDER = 'services'
 // UPLOAD_DIR is the folder served at /uploaded_files, so images are saved straight under it
@@ -98,10 +99,54 @@ const serviceStatusSchema = z.object({
 }).strict()
 
 // Both filters are optional: blank, null or missing means "don't filter by it"
+// Filters sheet: price chips. Keys are the chip text with only letters and digits kept, so "Under ₹500",
+// "under_500" and "₹500 – ₹1,500" all work. "Above ₹5,000" starts just above 5000 (prices have 2 decimals).
+const PRICE_RANGES = {
+    under500: { key: 'under_500', label: 'Under ₹500', maxPrice: 500, maxPriceExclusive: true },
+    '5001500': { key: '500_1500', label: '₹500 – ₹1,500', minPrice: 500, maxPrice: 1500, maxPriceExclusive: true },
+    '15005000': { key: '1500_5000', label: '₹1,500 – ₹5,000', minPrice: 1500, maxPrice: 5000 },
+    above5000: { key: 'above_5000', label: 'Above ₹5,000', minPrice: 5000.01 },
+}
+
+// Sort by sheet; the chip text works too ("Price: Low to High")
+const SORT_OPTIONS = {
+    popularity: 'popularity',
+    ratinghightolow: 'rating_desc', ratingdesc: 'rating_desc', rating: 'rating_desc',
+    pricelowtohigh: 'price_asc', priceasc: 'price_asc',
+    pricehightolow: 'price_desc', pricedesc: 'price_desc',
+    nearest: 'nearest',
+}
+
+const lettersAndDigits = (value) => (typeof value === 'string' ? value.toLowerCase().replace(/[^a-z0-9]/g, '') : value)
+
+// Every filter is optional: blank, null or missing means "don't filter by it"
 const listServicesSchema = z.object({
     ...deviceFields,
     serviceId: z.coerce.number({ error: 'Service ID must be a number' }).int().positive('Service ID must be a number').optional(),
     categoryId: z.coerce.number({ error: 'Category ID must be a number' }).int().positive('Category ID must be a number').optional(),
+    priceRange: z.preprocess(
+        lettersAndDigits,
+        z.enum(Object.keys(PRICE_RANGES), { error: 'Price range must be one of: under_500, 500_1500, 1500_5000, above_5000' }).optional()
+    ),
+    // A Services chip: part of the service name, any case; "All" means no filter
+    serviceName: z.preprocess(
+        (value) => (typeof value === 'string' && value.trim().toLowerCase() === 'all' ? undefined : value),
+        z.string().trim().max(100, 'Service name can be up to 100 characters').optional()
+    ),
+    // A Rating chip: "4.5", "4.5+" or "★ 4.5+"
+    minRating: z.preprocess(
+        (value) => (typeof value === 'string' ? value.replace(/[^\d.]/g, '') || value : value),
+        z.coerce.number({ error: 'Rating must be a number from 0 to 5' })
+            .min(0, 'Rating must be a number from 0 to 5')
+            .max(5, 'Rating must be a number from 0 to 5')
+            .optional()
+    ),
+    sortBy: z.preprocess(
+        (value) => (typeof value === 'string' ? SORT_OPTIONS[lettersAndDigits(value)] ?? value : value),
+        z.enum(['popularity', 'rating_desc', 'price_asc', 'price_desc', 'nearest'], {
+            error: 'Sort by must be one of: popularity, rating_desc, price_asc, price_desc, nearest',
+        }).optional()
+    ),
 }).strict()
 
 // Services are only for Salon Partners (customer_type 1)
@@ -154,11 +199,16 @@ const deleteImageFiles = (names) =>
 
 const mediaRow = (image, isDefault, now) => ({ mediaType: 'photo', media: image.name, isDefault, mediaDateAdded: now })
 
-const imageUrl = (name) => (name ? `${env.staticFileBaseUrl}/${SERVICE_IMAGE_FOLDER}/${name}` : null)
+// Adds each image's url (null when the file is missing), checking them all at once
+const withImageUrls = (req, media) =>
+    Promise.all(media.map(async (row) => ({
+        ...row,
+        url: await resolveMediaUrl(req, SERVICE_IMAGE_FOLDER, row.media, null, env.staticFileBaseUrl),
+    })))
 
-// Shaped like the Add/Edit Service screen and the service card
+// Shaped like the Add/Edit Service screen and the service card; media rows come from withImageUrls
 const formatService = (service, media, category, membershipName) => {
-    const images = media.map((row) => ({ mediaId: row.mediaId, url: imageUrl(row.media), isCover: row.isDefault === 'Y' }))
+    const images = media.map((row) => ({ mediaId: row.mediaId, url: row.url, isCover: row.isDefault === 'Y' }))
     const cover = images.find((image) => image.isCover)
 
     return {
@@ -232,7 +282,7 @@ const addService = async (req, res) => {
         return res.status(200).json({
             success: true,
             message: 'Service added successfully',
-            data: convertNulls(formatService({ ...service, serviceId }, media, category, membership.membershipName)),
+            data: convertNulls(formatService({ ...service, serviceId }, await withImageUrls(req, media), category, membership.membershipName)),
         })
     } catch (err) {
         if (written) await deleteImageFiles(images.all.map((image) => image.name))
@@ -348,7 +398,7 @@ const updateService = async (req, res) => {
         return res.status(200).json({
             success: true,
             message: 'Service updated successfully',
-            data: convertNulls(formatService(updated, savedMedia, category, membershipName)),
+            data: convertNulls(formatService(updated, await withImageUrls(req, savedMedia), category, membershipName)),
         })
     } catch (err) {
         if (written) await deleteImageFiles(images.all.map((image) => image.name))
@@ -364,14 +414,25 @@ const listServices = async (req, res) => {
 
     if (!parsed.success) return sendValidationError(res, parsed.error)
 
-    const { serviceId, categoryId } = parsed.data
+    const { serviceId, categoryId, serviceName, minRating, sortBy } = parsed.data
+    const priceRange = parsed.data.priceRange !== undefined ? PRICE_RANGES[parsed.data.priceRange] : null
+    const isFiltered = Boolean(priceRange) || Boolean(serviceName) || minRating !== undefined
 
     try {
         const customer = await findSalonPartner(req, res, parsed.data)
         if (!customer) return
 
         const [services, membership] = await Promise.all([
-            serviceModel.findCustomerServicesWithCategory(customer.customerId, { serviceId, categoryId }),
+            serviceModel.findCustomerServicesWithCategory(customer.customerId, {
+                serviceId,
+                categoryId,
+                minPrice: priceRange?.minPrice,
+                maxPrice: priceRange?.maxPrice,
+                maxPriceExclusive: priceRange?.maxPriceExclusive,
+                serviceName: serviceName || undefined,
+                minRating,
+                sortBy,
+            }),
             membershipModel.findActiveMembership(customer.customerId),
         ])
 
@@ -379,14 +440,18 @@ const listServices = async (req, res) => {
             return res.status(200).json({ success: false, message: 'Service not found.' })
         }
 
-        const media = await serviceModel.findMediaForServices(services.map((service) => service.serviceId))
+        const media = await withImageUrls(req, await serviceModel.findMediaForServices(services.map((service) => service.serviceId)))
 
-        const formatted = services.map((service) => formatService(
-            service,
-            media.filter((row) => row.serviceId === service.serviceId),
-            { categoryName: service.categoryName },
-            membership && membership.membershipId === service.membershipId ? membership.membershipName : null
-        ))
+        const formatted = services.map((service) => ({
+            ...formatService(
+                service,
+                media.filter((row) => row.serviceId === service.serviceId),
+                { categoryName: service.categoryName },
+                membership && membership.membershipId === service.membershipId ? membership.membershipName : null
+            ),
+            averageRating: Number(Number(service.averageRating).toFixed(1)),
+            reviewCount: service.reviewCount,
+        }))
 
         if (serviceId !== undefined) {
             return res.status(200).json({
@@ -400,8 +465,21 @@ const listServices = async (req, res) => {
             success: true,
             message: formatted.length
                 ? 'Services fetched successfully'
-                : categoryId !== undefined ? 'No services found in this category' : 'No services added yet',
-            data: convertNulls({ total: formatted.length, services: formatted }),
+                : isFiltered ? 'No services match these filters'
+                    : categoryId !== undefined ? 'No services found in this category' : 'No services added yet',
+            data: convertNulls({
+                total: formatted.length,
+                // What was applied, so the sheets can show the selected chips
+                filters: {
+                    categoryId: categoryId ?? null,
+                    priceRange: priceRange ? priceRange.key : null,
+                    priceRangeLabel: priceRange ? priceRange.label : null,
+                    serviceName: serviceName || null,
+                    minRating: minRating ?? null,
+                    sortBy: sortBy ?? null,
+                },
+                services: formatted,
+            }),
         })
     } catch (err) {
         console.error('List services error:', err)
@@ -484,7 +562,8 @@ const rupees = (value) =>
 // 2600 -> "2.6k"
 const shortCount = (value) => (value >= 1000 ? `${Number((value / 1000).toFixed(1))}k` : String(value))
 
-const profilePhotoUrl = (name) => (name ? `${env.staticFileBaseUrl}/salon_logos/${name}` : null)
+// Customer photos are saved with the salon logos (see auth.controller UPLOAD_DIR)
+const PROFILE_PHOTO_FOLDER = 'salon_logos'
 
 // The description is what the partner typed in "What does this service include?", one item per line
 const includedItems = (description) =>
@@ -535,12 +614,18 @@ const getServiceDetails = async (req, res) => {
             return res.status(200).json({ success: false, message: 'This salon is not available right now.' })
         }
 
-        const [media, summary, reviews, address] = await Promise.all([
-            serviceModel.findServiceMedia(serviceId),
+        const [media, summary, reviewRows, address] = await Promise.all([
+            serviceModel.findServiceMedia(serviceId).then((rows) => withImageUrls(req, rows)),
             reviewModel.findServiceRatingSummary(serviceId, salonId),
             reviewModel.findServiceReviews(serviceId, salonId),
             addressModel.findDefaultAddress(salonId),
         ])
+
+        // Reviewers' photos, checked all at once (null when the file is missing)
+        const reviews = await Promise.all(reviewRows.map(async (review) => ({
+            ...review,
+            photoUrl: await resolveMediaUrl(req, PROFILE_PHOTO_FOLDER, review.customerPhoto, null, env.staticFileBaseUrl),
+        })))
 
         const totalReviews = Number(summary?.totalReviews || 0)
         const averageRating = totalReviews ? Number(Number(summary.averageRating).toFixed(1)) : 0
@@ -553,7 +638,7 @@ const getServiceDetails = async (req, res) => {
             message: 'Service details fetched successfully',
             data: convertNulls({
                 // 1. Images
-                images: media.map((row) => ({ mediaId: row.mediaId, url: imageUrl(row.media), isCover: row.isDefault === 'Y' })),
+                images: media.map((row) => ({ mediaId: row.mediaId, url: row.url, isCover: row.isDefault === 'Y' })),
                 // 2. Service type
                 serviceType,
                 // 3. Category; label is "Parent · Category" when the category has a parent
@@ -593,7 +678,7 @@ const getServiceDetails = async (req, res) => {
                     items: reviews.map((review) => ({
                         reviewId: review.reviewId,
                         customerName: [review.firstName, review.lastName].filter(Boolean).join(' ').trim() || null,
-                        profileImage: profilePhotoUrl(review.customerPhoto),
+                        profileImage: review.photoUrl,
                         rating: Number(review.rating),
                         review: review.reviewText,
                         reviewDate: formatDate(review.reviewAddedDate),

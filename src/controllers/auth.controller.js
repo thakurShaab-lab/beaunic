@@ -250,6 +250,13 @@ const registerFailedAttempt = async (res, customer, message) => {
 // app_id / device_id from the login request, as stored in wl_customers
 const loginDevice = ({ app_id, device_id }) => ({ appId: String(app_id).trim(), deviceId: device_id })
 
+// Login stopped with success: false (pending approval, incomplete profile, ...), but the phone is still
+// saved so the follow-up APIs (onboarding steps, account-status) work from this device
+const sendErrorWithDevice = async (res, customer, device, error) => {
+    if (device) await authModel.updateLoginDevice(customer.customerId, device)
+    return sendError(res, error)
+}
+
 const completeLogin = async (res, customer, device) => {
     await authModel.recordSuccessfulLogin(customer.customerId, customer.currentLogin, device)
 
@@ -266,7 +273,6 @@ const completeLogin = async (res, customer, device) => {
         serviceType: customer.serviceType,
         salonName: customer.salonName,
         loginType: customer.loginType,
-        // Salon Partners only log in once onboarding is complete (see getProfileError)
         ...(isSalonPartner(customer) && { currentStep: ONBOARDING_COMPLETE_STEP }),
     }),
 });
@@ -300,16 +306,23 @@ const issueOtp = async (res, customer, message) => {
     })
 }
 
-const findLoginCustomerByMobile = async (res, mobileNumber) => {
+// device: only passed by /auth/login, to save the phone when the account's status stops the login
+const findLoginCustomerByMobile = async (res, mobileNumber, device) => {
     const customer = await authModel.findByMobile(mobileNumber)
     if (!customer) {
         sendError(res, { status: 200, message: 'No account found with this mobile number. Please register first.' })
         return null
     }
 
-    const error = getLockError(customer) || getStatusError(customer)
-    if (error) {
-        sendError(res, error)
+    const lockError = getLockError(customer)
+    if (lockError) {
+        sendError(res, lockError)
+        return null
+    }
+
+    const statusError = getStatusError(customer)
+    if (statusError) {
+        await sendErrorWithDevice(res, customer, device, statusError)
         return null
     }
 
@@ -419,28 +432,29 @@ const loginWithPassword = async (res, email, password, device) => {
         return registerFailedAttempt(res, customer, 'Invalid email or password.')
     }
 
+    // Password matched: from here on, a stopped login still saves this phone's app_id / device_id
     const statusError = getStatusError(customer)
-    if (statusError) return sendError(res, statusError)
+    if (statusError) return sendErrorWithDevice(res, customer, device, statusError)
 
     if (customer.isVerified !== '1' && customer.status !== '1') {
-        return res.status(200).json({
-            success: false,
+        return sendErrorWithDevice(res, customer, device, {
+            status: 200,
             message: 'Your account is not verified yet. Please verify your account to continue.',
         })
     }
 
     const profileError = await getProfileError(customer)
-    if (profileError) return sendError(res, profileError)
+    if (profileError) return sendErrorWithDevice(res, customer, device, profileError)
 
     return completeLogin(res, customer, device)
 }
 
-const loginWithMobile = async (res, mobileNumber) => {
-    const customer = await findLoginCustomerByMobile(res, mobileNumber)
+const loginWithMobile = async (res, mobileNumber, device) => {
+    const customer = await findLoginCustomerByMobile(res, mobileNumber, device)
     if (!customer) return
 
     const profileError = await getProfileError(customer)
-    if (profileError) return sendError(res, profileError)
+    if (profileError) return sendErrorWithDevice(res, customer, device, profileError)
 
     return issueOtp(res, customer, 'OTP sent to your registered mobile number')
 }
@@ -457,7 +471,7 @@ const login = async (req, res) => {
 
     try {
         if (/^\d{10}$/.test(emailOrMobile)) {
-            return await loginWithMobile(res, emailOrMobile)
+            return await loginWithMobile(res, emailOrMobile, loginDevice(parsed.data))
         }
         return await loginWithPassword(res, emailOrMobile.toLowerCase(), password, loginDevice(parsed.data))
     } catch (err) {

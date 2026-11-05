@@ -157,6 +157,15 @@ const recordSuccessfulLogin = async (customerId, previousLogin, device) => {
         .where(eq(wlCustomers.customerId, customerId))
 }
 
+// Saves the phone a customer is logging in from, without touching the login counters/dates
+// (used when login stops early, e.g. pending approval or an incomplete profile)
+const updateLoginDevice = async (customerId, device) => {
+    await db
+        .update(wlCustomers)
+        .set({ appId: device.appId, deviceId: device.deviceId })
+        .where(eq(wlCustomers.customerId, customerId))
+}
+
 const findByIdAndDevice = async (customerId, appId, deviceId) => {
     const rows = await db
         .select({
@@ -196,6 +205,7 @@ const findProfile = async (customerId) => {
             customerId: wlCustomers.customerId,
             customerType: wlCustomers.customerType,
             firstName: wlCustomers.firstName,
+            gender: wlCustomers.gender,
             userName: wlCustomers.userName,
             mobileNumber: wlCustomers.mobileNumber,
             salonName: wlCustomers.salonName,
@@ -248,5 +258,6 @@ module.exports = {
     verifyLoginOtp,
     recordFailedLogin,
     recordSuccessfulLogin,
+    updateLoginDevice,
     nowString,
 }

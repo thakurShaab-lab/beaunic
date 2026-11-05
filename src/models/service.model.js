@@ -1,7 +1,11 @@
-const { eq, and, ne, inArray, asc, desc, sql } = require("drizzle-orm")
+const { eq, and, ne, inArray, asc, desc, sql, gte, lt, lte, like } = require("drizzle-orm")
 const { alias } = require("drizzle-orm/mysql-core")
 const db = require("../config/drizzle")
 const { wlServices } = require("../schema/wl-services")
+const { wlReviews } = require("../schema/wl-reviews")
+
+// "50%_off" -> "50\%\_off", so LIKE matches the text literally
+const escapeLike = (value) => value.replace(/[\\%_]/g, (ch) => `\\${ch}`)
 const { wlCustomers } = require("../schema/wl-customers")
 const { wlServicesMedia } = require("../schema/wl-services-media")
 const { wlCategories } = require("../schema/wl-categories")
@@ -25,7 +29,39 @@ const findCustomerService = async (customerId, serviceId) => {
 
 // A partner's services with their category name, newest first; deleted ones are left out.
 // Optional filters: serviceId (one service) and categoryId (one category); unset ones are ignored.
-const findCustomerServicesWithCategory = async (customerId, { serviceId, categoryId } = {}) =>
+// Average stars and number of active reviews per service, joined into the list
+const serviceRatings = db
+    .select({
+        serviceId: wlReviews.reviewForId,
+        averageRating: sql`AVG(${wlReviews.rating})`.mapWith(Number).as("average_rating"),
+        reviewCount: sql`COUNT(*)`.mapWith(Number).as("review_count"),
+    })
+    .from(wlReviews)
+    .where(and(eq(wlReviews.reviewType, "service"), eq(wlReviews.status, "1")))
+    .groupBy(wlReviews.reviewForId)
+    .as("service_ratings")
+
+const averageRating = sql`COALESCE(${serviceRatings.averageRating}, 0)`
+const reviewCount = sql`COALESCE(${serviceRatings.reviewCount}, 0)`
+
+// Sort options of the Sort by sheet; services without a price always come last when sorting by price.
+// "nearest" has nothing to compare (no coordinates are stored), so it keeps the default newest-first order.
+const SERVICE_SORTS = {
+    // Compared as text: MySQL sorts ENUMs by definition position, not value
+    popularity: [desc(sql`${wlServices.isPopular} = '1'`), desc(reviewCount), desc(averageRating)],
+    rating_desc: [desc(averageRating), desc(reviewCount)],
+    price_asc: [sql`${wlServices.servicePrice} IS NULL`, asc(wlServices.servicePrice)],
+    price_desc: [sql`${wlServices.servicePrice} IS NULL`, desc(wlServices.servicePrice)],
+    nearest: [],
+}
+
+// A partner's services with their category name and rating, deleted ones left out. Every filter is optional:
+// serviceId, categoryId, minPrice / maxPrice (maxPriceExclusive makes the upper bound "under"),
+// serviceName (part of the name, any case), minRating (average stars), sortBy (a SERVICE_SORTS key; newest first when unset).
+const findCustomerServicesWithCategory = async (
+    customerId,
+    { serviceId, categoryId, minPrice, maxPrice, maxPriceExclusive, serviceName, minRating, sortBy } = {}
+) =>
     db
         .select({
             serviceId: wlServices.serviceId,
@@ -39,18 +75,27 @@ const findCustomerServicesWithCategory = async (customerId, { serviceId, categor
             status: wlServices.status,
             serviceAddedDate: wlServices.serviceAddedDate,
             serviceUpdatedDate: wlServices.serviceUpdatedDate,
+            averageRating: averageRating.mapWith(Number),
+            reviewCount: reviewCount.mapWith(Number),
         })
         .from(wlServices)
         .leftJoin(wlCategories, eq(wlCategories.categoryId, wlServices.categoryId))
+        .leftJoin(serviceRatings, eq(serviceRatings.serviceId, wlServices.serviceId))
         .where(
             and(
                 eq(wlServices.customerId, customerId),
                 ne(wlServices.status, "2"),
                 serviceId !== undefined ? eq(wlServices.serviceId, serviceId) : undefined,
-                categoryId !== undefined ? eq(wlServices.categoryId, categoryId) : undefined
+                categoryId !== undefined ? eq(wlServices.categoryId, categoryId) : undefined,
+                minPrice !== undefined ? gte(wlServices.servicePrice, String(minPrice)) : undefined,
+                maxPrice !== undefined
+                    ? (maxPriceExclusive ? lt : lte)(wlServices.servicePrice, String(maxPrice))
+                    : undefined,
+                serviceName !== undefined ? like(wlServices.serviceName, `%${escapeLike(serviceName)}%`) : undefined,
+                minRating !== undefined ? sql`${averageRating} >= ${minRating}` : undefined
             )
         )
-        .orderBy(desc(wlServices.serviceId))
+        .orderBy(...(SERVICE_SORTS[sortBy] || []), desc(wlServices.serviceId))
 
 // Images for several services in one query, cover first
 const findMediaForServices = async (serviceIds) => {

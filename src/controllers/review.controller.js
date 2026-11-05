@@ -36,7 +36,8 @@ const reviewType = z.preprocess(
 const addReviewSchema = z.object({
     ...deviceFields,
     reviewType,
-    reviewForId: z.coerce.number({ error: 'Please select what you are reviewing' }).int().positive('Please select what you are reviewing').optional(),
+    // Optional: blank, null or missing saves general feedback for the review type
+    reviewForId: z.coerce.number({ error: 'Review for ID must be a number' }).int().positive('Review for ID must be a number').optional(),
     rating: z.coerce.number({ error: 'Please tap a star to rate' })
         .int('Rating must be a whole number from 1 to 5')
         .min(1, 'Please tap a star to rate')
@@ -74,10 +75,12 @@ const formatReview = (review) => ({
     reviewId: review.reviewId,
     reviewType: review.reviewType,
     reviewTypeLabel: REVIEW_TYPES[review.reviewType],
-    reviewForId: review.reviewForId,
+    // 0 = general feedback, not about a particular salon or service
+    reviewForId: review.reviewForId || null,
     salonId: review.salonId || null,
     salonName: review.salonName,
-    title: review.reviewType === 'service' ? itemTitle(review.serviceName, review.salonName) : itemTitle(review.salonName),
+    title: (review.reviewType === 'service' ? itemTitle(review.serviceName, review.salonName) : itemTitle(review.salonName))
+        || REVIEW_TYPES[review.reviewType],
     rating: Number(review.rating),
     review: review.reviewText,
     reviewDate: formatDate(review.reviewAddedDate),
@@ -97,21 +100,26 @@ const addReview = async (req, res) => {
         const customer = await findUser(req, res, d)
         if (!customer) return
 
-        if (!REVIEWABLE[d.reviewType]) {
-            return res.status(200).json({ success: false, message: notAvailable(d.reviewType) })
-        }
+        // Without reviewForId the review is general feedback for its type, saved with review_for_id / salon_id 0.
+        // With one, the salon or service must exist; employees and products can't be looked up yet.
+        let item = null
+        if (d.reviewForId !== undefined) {
+            if (!REVIEWABLE[d.reviewType]) {
+                return res.status(200).json({ success: false, message: notAvailable(d.reviewType) })
+            }
 
-        const item = await REVIEWABLE[d.reviewType].findOne(d.reviewForId)
-        if (!item) {
-            return res.status(200).json({ success: false, message: REVIEWABLE[d.reviewType].notFound })
+            item = await REVIEWABLE[d.reviewType].findOne(d.reviewForId)
+            if (!item) {
+                return res.status(200).json({ success: false, message: REVIEWABLE[d.reviewType].notFound })
+            }
         }
 
         const now = authModel.nowString()
         const review = {
             customerId: customer.customerId,
             reviewType: d.reviewType,
-            reviewForId: item.itemId,
-            salonId: item.salonId,
+            reviewForId: item ? item.itemId : 0,
+            salonId: item ? item.salonId : 0,
             rating: d.rating,
             reviewText: d.review,
             status: '1',
@@ -127,8 +135,8 @@ const addReview = async (req, res) => {
             data: convertNulls(formatReview({
                 ...review,
                 reviewId,
-                salonName: item.salonName,
-                serviceName: d.reviewType === 'service' ? item.itemName : null,
+                salonName: item ? item.salonName : null,
+                serviceName: item && d.reviewType === 'service' ? item.itemName : null,
             })),
         })
     } catch (err) {

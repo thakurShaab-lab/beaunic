@@ -4,7 +4,7 @@ const wlReviews = mysqlTable("wl_reviews", {
 	reviewId: int("review_id").autoincrement().notNull(),
 	customerId: int("customer_id").notNull(),                                       // wl_customers, the User (customer_type 2) who wrote the review
 	reviewType: mysqlEnum("review_type", ['salon','service','employee','product']).notNull(),      // What is being reviewed
-	reviewForId: int("review_for_id").notNull(),                                    // ID of the reviewed item: wl_customers (salon), wl_services (service), ...
+	reviewForId: int("review_for_id").default(null),                                    // ID of the reviewed item: wl_customers (salon), wl_services (service), ...
 	salonId: int("salon_id").default(0).notNull(),                                  // wl_customers, the Salon Partner the reviewed item belongs to
 	rating: tinyint().notNull(),                                                    // 1 to 5 stars
 	reviewText: text("review_text"),                                                // "Your review"
