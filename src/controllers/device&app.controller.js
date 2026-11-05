@@ -1,4 +1,5 @@
 const validationController = require('../models/device&app.model')
+const { LOGIN_ROUTES } = require('../middleware/auth.middleware')
 
 const validateRequestDevice = async (req, res) => {
     const { app_id, device_id } = req.body || {}
@@ -15,6 +16,9 @@ const validateRequestDevice = async (req, res) => {
         })
         return false
     }
+
+    // Logging in is how a new phone gets saved to an account, so these routes only need app_id and device_id sent
+    if (LOGIN_ROUTES.has(req.baseUrl + req.path)) return true
 
     const isValid = await validationController.validateDevice(
         app_id,

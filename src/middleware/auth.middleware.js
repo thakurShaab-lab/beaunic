@@ -9,7 +9,6 @@ const jwtAuthMiddleware = (req, res, next) => {
   try {
     const authHeader = req.headers.authorization
 
-    // The token is sent as-is in the Authorization header; a "Bearer " prefix is still accepted
     const token = (authHeader || '').trim().replace(/^Bearer\s+/i, '').trim()
 
     if (!token) {
@@ -47,6 +46,8 @@ const jwtAuthMiddleware = (req, res, next) => {
   }
 }
 
+const LOGIN_ROUTES = new Set(['/api/auth/login', '/api/auth/verify-otp', '/api/auth/resend-otp'])
+
 const deviceAuthMiddleware = async (req, res, next) => {
   try {
     const rawAppId = req.headers['x-app-id'] || req.body?.app_id
@@ -71,6 +72,12 @@ const deviceAuthMiddleware = async (req, res, next) => {
         success: false,
         message: 'app_type must be a non-empty string.',
       })
+    }
+
+    // Logging in is how a new phone gets saved to an account, so these routes only need app_id and device_id sent
+    if (LOGIN_ROUTES.has(req.baseUrl + req.path)) {
+      req.device = { id: null, app_id: appId.trim(), device_id: deviceId.trim(), app_type: appType }
+      return next()
     }
 
     const [customer] = await db
@@ -115,4 +122,4 @@ const deviceAuthMiddleware = async (req, res, next) => {
   }
 }
 
-module.exports = { deviceAuthMiddleware, jwtAuthMiddleware }
+module.exports = { deviceAuthMiddleware, jwtAuthMiddleware, LOGIN_ROUTES }

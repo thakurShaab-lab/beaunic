@@ -21,6 +21,7 @@ const serviceRoutes = require('./src/routes/service.routes')
 const cmsRoutes = require('./src/routes/cms.routes')
 const reviewRoutes = require('./src/routes/review.routes')
 const complaintRoutes = require('./src/routes/complaint.routes')
+const slotRoutes = require('./src/routes/slot.routes')
 
 
 const app = express()
@@ -123,6 +124,7 @@ app.use('/api/service', serviceRoutes)
 app.use('/api/cms', cmsRoutes)
 app.use('/api/review', reviewRoutes)
 app.use('/api/complaint', complaintRoutes)
+app.use('/api/slot', slotRoutes)
 
 
 const server = app.listen(env.port, '127.0.0.1', () => {

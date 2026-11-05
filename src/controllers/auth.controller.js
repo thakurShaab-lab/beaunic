@@ -113,7 +113,7 @@ const registerSchema = z
 
 const loginSchema = z
     .object({
-        app_id: z.union([z.string(), z.number()]),
+        app_id: z.union([z.string(), z.number()], { error: 'App ID is required' }),
         device_id: z.string().trim().min(1, 'Device ID is required'),
         emailOrMobile: z.string().trim().min(1, "Email or mobile number is required"),
         password: z.string().min(1).optional(),
@@ -152,7 +152,7 @@ const loginSchema = z
     })
 
 const otpSchema = z.object({
-    app_id: z.union([z.string(), z.number()]),
+    app_id: z.union([z.string(), z.number()], { error: 'App ID is required' }),
     device_id: z.string().trim().min(1, 'Device ID is required'),
     mobileNumber: z.string().trim().regex(
         /^\d{10}$/,
@@ -180,8 +180,7 @@ const SALON_ONBOARDING_STEPS = [
     { key: 'complete_salon_profile', title: 'Complete salon profile' },
 ]
 
-// Salon Partner onboarding step, numbered like SALON_ONBOARDING_STEPS (step 1, registration, is always done):
-// 2 = awaiting admin approval, 3 = choose membership, 4 = complete salon profile, 5 = all done
+
 const ONBOARDING_COMPLETE_STEP = SALON_ONBOARDING_STEPS.length + 1
 
 const getCurrentStep = ({ status, membership, salonAdd }) =>
@@ -226,7 +225,7 @@ const getStatusError = (customer) => {
 
     // A Salon Partner still awaiting admin approval is on step 2
     return isSalonPartner(customer) && customer.status === '0'
-        ? { status: 200, message, currentStep: getCurrentStep(customer) }
+        ? { status: 200, message, customerId: customer.customerId, currentStep: getCurrentStep(customer) }
         : { status: 200, message }
 }
 
@@ -292,6 +291,7 @@ const issueOtp = async (res, customer, message) => {
         success: true,
         message,
         data: {
+            ...(isSalonPartner(customer) && { customerId: customer.customerId }),
             mobileNumber: customer.mobileNumber,
             otp,
             expiresInMinutes: OTP_EXPIRY_MINUTES,
@@ -402,7 +402,7 @@ const getProfileError = async (customer) => {
 
     if (currentStep === ONBOARDING_COMPLETE_STEP) return null
 
-    return { status: 200, message: 'Please complete your profile first.', currentStep }
+    return { status: 200, message: 'Please complete your profile first.', customerId: customer.customerId, currentStep }
 }
 
 const loginWithPassword = async (res, email, password, device) => {
