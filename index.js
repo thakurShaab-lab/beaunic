@@ -26,6 +26,7 @@ const bookingRoutes = require('./src/routes/booking.routes')
 const favoriteRoutes = require('./src/routes/favorite.routes')
 const walletRoutes = require('./src/routes/wallet.routes')
 const referralRoutes = require('./src/routes/referral.routes')
+const enquiryRoutes = require('./src/routes/enquiry.routes')
 
 
 const app = express()
@@ -133,6 +134,7 @@ app.use('/api/booking', bookingRoutes)
 app.use('/api/favorite', favoriteRoutes)
 app.use('/api/wallet', walletRoutes)
 app.use('/api/referral', referralRoutes)
+app.use('/api/enquiry', enquiryRoutes)
 
 
 const server = app.listen(env.port, '127.0.0.1', () => {

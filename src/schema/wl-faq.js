@@ -5,6 +5,7 @@ const wlFaq = mysqlTable("wl_faq", {
 	faqParentId: int("faq_parent_id").default(0).notNull(),
 	faqQuestion: varchar("faq_question", { length: 225 }).notNull(),
 	faqAnswer: text("faq_answer").notNull(),
+	faqCategory: mysqlEnum("faq_category", ['booking','payment','refund','general']).default('general').notNull(),  // New Field    // Help & Support tabs: Booking Help, Payment Help, Refund Help
 	sortOrder: int("sort_order"),
 	status: mysqlEnum(['1','2','3']).default('1').notNull(),
 	faqDateAdded: datetime("faq_date_added", { mode: 'string'}).notNull(),

@@ -1,6 +1,7 @@
-const { eq, and, asc } = require("drizzle-orm")
+const { eq, and, asc, sql, count } = require("drizzle-orm")
 const db = require("../config/drizzle")
 const { tblAdmin } = require("../schema/tbl-admin")
+const { wlFaq } = require("../schema/wl-faq")
 
 const findSupportDetails = async () => {
     const rows = await db
@@ -27,4 +28,25 @@ const findSupportDetails = async () => {
     return rows[0] || null
 }
 
-module.exports = { findSupportDetails }
+// Active FAQs (status 1) of one Help & Support tab, in the admin's sort order
+const findFaqs = async (faqCategory) =>
+    db
+        .select({
+            faqId: wlFaq.faqId,
+            question: wlFaq.faqQuestion,
+            answer: wlFaq.faqAnswer,
+            faqCategory: wlFaq.faqCategory,
+        })
+        .from(wlFaq)
+        .where(and(eq(wlFaq.status, "1"), eq(wlFaq.faqCategory, faqCategory)))
+        .orderBy(sql`${wlFaq.sortOrder} IS NULL`, asc(wlFaq.sortOrder), asc(wlFaq.faqId))
+
+// How many active FAQs each tab has
+const countFaqsByCategory = async () =>
+    db
+        .select({ faqCategory: wlFaq.faqCategory, total: count() })
+        .from(wlFaq)
+        .where(eq(wlFaq.status, "1"))
+        .groupBy(wlFaq.faqCategory)
+
+module.exports = { findSupportDetails, findFaqs, countFaqsByCategory }
