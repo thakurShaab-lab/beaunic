@@ -458,7 +458,7 @@ const listServices = async (req, res) => {
             return res.status(200).json({ success: false, message: 'Salon not found.' })
         }
 
-        const [services, membership] = await Promise.all([
+        const [services, membership, favoritesCount] = await Promise.all([
             serviceModel.findCustomerServicesWithCategory(salonId, {
                 activeOnly: isUser,
                 serviceId,
@@ -472,6 +472,8 @@ const listServices = async (req, res) => {
             }),
             // The membership badge is the partner's own; a User doesn't see it
             isUser ? null : membershipModel.findActiveMembership(customer.customerId),
+            // The ♡ badge: how many services the logged-in customer saved (0 when none)
+            favoriteModel.countCustomerFavorites(customer.customerId),
         ])
 
         if (serviceId !== undefined && !services.length) {
@@ -497,7 +499,7 @@ const listServices = async (req, res) => {
             return res.status(200).json({
                 success: true,
                 message: 'Service details fetched successfully',
-                data: convertNulls({ service: formatted[0] }),
+                data: convertNulls({ favoritesCount, service: formatted[0] }),
             })
         }
 
@@ -510,6 +512,7 @@ const listServices = async (req, res) => {
                         : isUser ? 'No services found' : 'No services added yet',
             data: convertNulls({
                 total: formatted.length,
+                favoritesCount,
                 // What was applied, so the sheets can show the selected chips
                 filters: {
                     categoryId: categoryId ?? null,
