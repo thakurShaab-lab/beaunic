@@ -1,10 +1,10 @@
-const { eq, and, ne, inArray, asc, desc, count, max, isNotNull } = require("drizzle-orm")
+const { eq, and, inArray, asc, desc, count, max, isNotNull } = require("drizzle-orm")
 const { alias } = require("drizzle-orm/mysql-core")
 const db = require("../config/drizzle")
 const { wlComplaints } = require("../schema/wl-complaints")
 const { wlComplaintReplies } = require("../schema/wl-complaint-replies")
 const { wlCustomers } = require("../schema/wl-customers")
-const { wlOrders } = require("../schema/wl-orders")
+const { wlBookings } = require("../schema/wl-bookings")
 
 // The User who raised a complaint and the Salon Partner it is against
 const raisedBy = alias(wlCustomers, "raised_by")
@@ -34,18 +34,13 @@ const findActiveSalon = async (salonId) => {
     return rows[0] || null
 }
 
-// Orders and bookings are both rows in wl_orders; only the customer's own, not deleted, can be attached
-const findCustomerOrder = async (customerId, orderId) => {
+// Complaints are about bookings (wl_bookings); only the customer's own can be attached.
+// wl_complaints.order_id holds the booking ID.
+const findCustomerOrder = async (customerId, bookingId) => {
     const rows = await db
-        .select({ orderId: wlOrders.orderId, invoiceNumber: wlOrders.invoiceNumber })
-        .from(wlOrders)
-        .where(
-            and(
-                eq(wlOrders.orderId, orderId),
-                eq(wlOrders.customerId, customerId),
-                ne(wlOrders.orderStatus, "Deleted")
-            )
-        )
+        .select({ orderId: wlBookings.bookingId, invoiceNumber: wlBookings.invoiceNumber, salonId: wlBookings.salonId })
+        .from(wlBookings)
+        .where(and(eq(wlBookings.bookingId, bookingId), eq(wlBookings.customerId, customerId)))
         .limit(1)
 
     return rows[0] || null
@@ -57,7 +52,7 @@ const createComplaint = async (values) => {
     return result.insertId
 }
 
-// The viewer's complaints with both parties' names and the order / booking details from wl_orders, newest first.
+// The viewer's complaints with both parties' names and the booking details from wl_bookings, newest first.
 // Optional filters: complaintId (one complaint) and statuses (list of status values); unset ones are ignored.
 const findComplaints = async (customer, { complaintId, statuses } = {}) =>
     db
@@ -69,11 +64,12 @@ const findComplaints = async (customer, { complaintId, statuses } = {}) =>
             salonId: wlComplaints.salonId,
             salonName: salon.salonName,
             orderId: wlComplaints.orderId,
-            invoiceNumber: wlOrders.invoiceNumber,
-            orderStatus: wlOrders.orderStatus,
-            paymentStatus: wlOrders.paymentStatus,
-            totalAmount: wlOrders.totalAmount,
-            orderReceivedDate: wlOrders.orderReceivedDate,
+            invoiceNumber: wlBookings.invoiceNumber,
+            orderStatus: wlBookings.orderStatus,
+            paymentStatus: wlBookings.paymentStatus,
+            totalAmount: wlBookings.totalAmount,
+            orderReceivedDate: wlBookings.orderReceivedDate,
+            serviceName: wlBookings.serviceName,
             complaintSubject: wlComplaints.complaintSubject,
             complaintDescription: wlComplaints.complaintDescription,
             status: wlComplaints.status,
@@ -85,7 +81,7 @@ const findComplaints = async (customer, { complaintId, statuses } = {}) =>
         .from(wlComplaints)
         .leftJoin(raisedBy, eq(raisedBy.customerId, wlComplaints.customerId))
         .leftJoin(salon, eq(salon.customerId, wlComplaints.salonId))
-        .leftJoin(wlOrders, eq(wlOrders.orderId, wlComplaints.orderId))
+        .leftJoin(wlBookings, eq(wlBookings.bookingId, wlComplaints.orderId))
         .where(
             and(
                 viewerCondition(customer),

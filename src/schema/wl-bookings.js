@@ -42,12 +42,34 @@ const wlBookings = mysqlTable("wl_bookings", {
 	cancelReasonNote: text("cancel_reason_note"),                                                 // What the customer wrote for "Other"
 	refundMethod: mysqlEnum("refund_method", ['original','wallet']),                              // original=Original payment method, wallet=Beaunic Wallet; NULL when nothing was paid
 	bookingCancelledDate: datetime("booking_cancelled_date", { mode: 'string'}),
+	// Cancellation request: the customer asks, the Salon Partner approves (booking cancelled) or rejects (booking unchanged)
+	cancelStatus: mysqlEnum("cancel_status", ['none','pending','approved','rejected']).default('none').notNull(),
+	cancelRequestedDate: datetime("cancel_requested_date", { mode: 'string'}),
+	cancelRespondedDate: datetime("cancel_responded_date", { mode: 'string'}),
+	cancelResponseNote: text("cancel_response_note"),                                            // The partner's note with the decision
+	// Reschedule request: the slot asked for; on approval the booking moves there and previous_* keep the old slot
+	rescheduleStatus: mysqlEnum("reschedule_status", ['none','pending','approved','rejected']).default('none').notNull(),
+	requestedSlotId: int("requested_slot_id"),                                                    // wl_booking_slots
+	requestedSlotDate: date("requested_slot_date", { mode: 'string'}),
+	requestedStartTime: time("requested_start_time"),
+	requestedEndTime: time("requested_end_time"),
+	previousSlotId: int("previous_slot_id"),
+	previousSlotDate: date("previous_slot_date", { mode: 'string'}),
+	previousStartTime: time("previous_start_time"),
+	previousEndTime: time("previous_end_time"),
+	rescheduleRequestedDate: datetime("reschedule_requested_date", { mode: 'string'}),
+	rescheduleRespondedDate: datetime("reschedule_responded_date", { mode: 'string'}),
+	rescheduleResponseNote: text("reschedule_response_note"),                                    // The partner's note with the decision
+	// Payments: how the amount was received (Online vs Cash on the Payment Overview) and when
+	paymentMode: mysqlEnum("payment_mode", ['online','cash']),
+	paymentReceivedDate: datetime("payment_received_date", { mode: 'string'}),
 	bookingUpdatedDate: datetime("booking_updated_date", { mode: 'string'}),
 },
 (table) => [
 	index("idx_bookings_customer_id").on(table.customerId),
 	index("idx_bookings_salon_id").on(table.salonId),
 	index("idx_bookings_slot_customer").on(table.slotId, table.customerId),
+	index("idx_bookings_salon_requests").on(table.salonId, table.cancelStatus, table.rescheduleStatus),
 	primaryKey({ columns: [table.bookingId], name: "wl_bookings_booking_id"}),
 ]);
 

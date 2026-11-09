@@ -5,7 +5,7 @@ const wlComplaints = mysqlTable("wl_complaints", {
 	complaintId: int("complaint_id").autoincrement().notNull(),
 	customerId: int("customer_id").notNull().references(() => wlCustomers.customerId),     // wl_customers, the User (customer_type 2) who raised it
 	salonId: int("salon_id").notNull().references(() => wlCustomers.customerId),           // wl_customers, the Salon Partner (customer_type 1) it is raised against
-	orderId: int("order_id").notNull(),                                             // wl_orders, the related order / booking
+	orderId: int("order_id").notNull(),                                             // wl_bookings, the booking the complaint is about
 	complaintSubject: varchar("complaint_subject", { length: 150 }).notNull(),      // "One line about the issue"
 	complaintDescription: text("complaint_description").notNull(),                  // "Describe what happened", the first message of the conversation
 	status: mysqlEnum(['1','2','3','4']).default('1').notNull(),                    // 1=Pending, 2=In Progress, 3=Resolved, 4=Closed

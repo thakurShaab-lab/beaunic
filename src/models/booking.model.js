@@ -1,4 +1,4 @@
-const { eq, and, sql, inArray, asc, desc, count } = require("drizzle-orm")
+const { eq, and, sql, asc, desc, count } = require("drizzle-orm")
 const { alias } = require("drizzle-orm/mysql-core")
 const db = require("../config/drizzle")
 const { wlBookingSlots } = require("../schema/wl-booking-slots")
@@ -112,96 +112,213 @@ const releaseSlotPlace = (tx, slotId) =>
         .set({ bookedCount: sql`GREATEST(${wlBookingSlots.bookedCount} - 1, 0)` })
         .where(eq(wlBookingSlots.slotId, slotId))
 
-// Cancels the customer's booking and frees its place in the slot, in one transaction.
+// ----- Cancellation / reschedule requests -----
+// The customer asks (status pending); the Salon Partner approves or rejects. Only one request at a time per booking.
+
+// Checks the slot a booking would move to, inside the transaction (slot row locked).
+// Returns { error } or { slot }
+const checkRequestedSlot = async (tx, booking, newSlotId, checkSlot) => {
+    if (booking.slotId === newSlotId) return { error: "same_slot" }
+
+    const [slot] = await tx.select().from(wlBookingSlots).where(eq(wlBookingSlots.slotId, newSlotId)).limit(1).for("update")
+    if (!slot || slot.customerId !== booking.salonId || slot.status !== "1") return { error: "slot_not_found" }
+
+    const slotError = checkSlot(slot)
+    if (slotError) return { error: slotError }
+
+    // The customer can't hold two bookings in the same slot
+    const [existing] = await tx
+        .select({ bookingId: wlBookings.bookingId })
+        .from(wlBookings)
+        .where(and(eq(wlBookings.slotId, newSlotId), eq(wlBookings.customerId, booking.customerId), eq(wlBookings.orderStatus, "Booked")))
+        .limit(1)
+    if (existing) return { error: "already_booked" }
+
+    if (slot.bookedCount >= slot.maxBookings) return { error: "full" }
+
+    return { slot }
+}
+
+// A request still waiting for the partner blocks a new one
+const pendingRequestError = (booking) => {
+    if (booking.cancelStatus === "pending") return "cancel_pending"
+    if (booking.rescheduleStatus === "pending") return "reschedule_pending"
+    return null
+}
+
+// Customer: asks to cancel. The booking stays as it is until the partner approves.
 //   checkBooking(booking): an error code when it can't be cancelled, or null
-//   cancellation(booking): { cancelReason, cancelReasonNote, refundMethod } to save with it
-// Returns { error: 'not_found' | <checkBooking code> } or { booking } (the booking as cancelled)
-const cancelBooking = async ({ bookingId, customerId, checkBooking, cancellation, now }) =>
+//   cancellation(booking): { cancelReason, cancelReasonNote, refundMethod }
+// Returns { error } or { booking } (with the request saved)
+const requestCancellation = async ({ bookingId, customerId, checkBooking, cancellation, now }) =>
     db.transaction(async (tx) => {
         const booking = await lockCustomerBooking(tx, customerId, bookingId)
         if (!booking) return { error: "not_found" }
 
-        const bookingError = checkBooking(booking)
+        const bookingError = checkBooking(booking) || pendingRequestError(booking)
         if (bookingError) return { error: bookingError }
 
         const values = {
-            orderStatus: "Cancelled",
-            isCancel: "1",
             ...cancellation(booking),
-            bookingCancelledDate: now,
+            cancelStatus: "pending",
+            cancelRequestedDate: now,
+            cancelRespondedDate: null,
+            cancelResponseNote: null,
             bookingUpdatedDate: now,
         }
         await tx.update(wlBookings).set(values).where(eq(wlBookings.bookingId, bookingId))
-        await releaseSlotPlace(tx, booking.slotId)
 
         return { booking: { ...booking, ...values } }
     })
 
-// Moves the customer's booking to another slot of the same salon, in one transaction: the old slot gets its
-// place back, the new one loses one, and the booking takes the new slot's date and time.
-//   checkBooking(booking) / checkSlot(slot): error codes when the booking can't move or the slot can't take it
-// Returns { error: 'not_found' | 'same_slot' | 'slot_not_found' | 'already_booked' | 'full' | <check codes> }
-// or { booking, previous: { slotId, slotDate, startTime, endTime }, slot }
-const rescheduleBooking = async ({ bookingId, customerId, newSlotId, checkBooking, checkSlot, now }) =>
+// Customer: asks to move to another slot of the same salon. The slot is checked now and again on approval;
+// nothing moves until the partner approves.
+// Returns { error } or { booking, slot }
+const requestReschedule = async ({ bookingId, customerId, newSlotId, checkBooking, checkSlot, now }) =>
     db.transaction(async (tx) => {
         const booking = await lockCustomerBooking(tx, customerId, bookingId)
         if (!booking) return { error: "not_found" }
 
-        const bookingError = checkBooking(booking)
+        const bookingError = checkBooking(booking) || pendingRequestError(booking)
         if (bookingError) return { error: bookingError }
 
-        if (booking.slotId === newSlotId) return { error: "same_slot" }
-
-        // Lock both slots in ID order, so two reschedules between the same slots can't deadlock
-        const slots = await tx
-            .select()
-            .from(wlBookingSlots)
-            .where(inArray(wlBookingSlots.slotId, [booking.slotId, newSlotId].sort((a, b) => a - b)))
-            .orderBy(asc(wlBookingSlots.slotId))
-            .for("update")
-
-        const slot = slots.find((row) => row.slotId === newSlotId)
-        if (!slot || slot.customerId !== booking.salonId || slot.status !== "1") return { error: "slot_not_found" }
-
-        const slotError = checkSlot(slot)
-        if (slotError) return { error: slotError }
-
-        // The customer can't hold two bookings in the same slot
-        const [existing] = await tx
-            .select({ bookingId: wlBookings.bookingId })
-            .from(wlBookings)
-            .where(
-                and(
-                    eq(wlBookings.slotId, newSlotId),
-                    eq(wlBookings.customerId, customerId),
-                    eq(wlBookings.orderStatus, "Booked")
-                )
-            )
-            .limit(1)
-
-        if (existing) return { error: "already_booked" }
-
-        if (slot.bookedCount >= slot.maxBookings) return { error: "full" }
+        const { error, slot } = await checkRequestedSlot(tx, booking, newSlotId, checkSlot)
+        if (error) return { error }
 
         const values = {
+            rescheduleStatus: "pending",
+            requestedSlotId: slot.slotId,
+            requestedSlotDate: slot.slotDate,
+            requestedStartTime: slot.startTime,
+            requestedEndTime: slot.endTime,
+            rescheduleRequestedDate: now,
+            rescheduleRespondedDate: null,
+            rescheduleResponseNote: null,
+            bookingUpdatedDate: now,
+        }
+        await tx.update(wlBookings).set(values).where(eq(wlBookings.bookingId, bookingId))
+
+        return { booking: { ...booking, ...values }, slot }
+    })
+
+// Partner: approves or rejects the pending request of one of the salon's bookings, in one transaction.
+//   requestType: 'cancel' | 'reschedule'; action: 'approve' | 'reject'
+//   checkSlot(slot): for an approved reschedule, an error code when the requested slot can't take it any more
+// Approve cancel: the booking is cancelled and its slot place freed.
+// Approve reschedule: the booking moves to the requested slot (old slot freed, new one taken).
+// Reject: only the request status changes; the booking keeps its date, time and status.
+// Returns { error: 'not_found' | 'no_pending_request' | 'booking_closed' | <slot codes> } or { booking }
+const respondToRequest = async ({ bookingId, salonId, requestType, action, note, checkSlot, now }) =>
+    db.transaction(async (tx) => {
+        const [booking] = await tx
+            .select()
+            .from(wlBookings)
+            .where(and(eq(wlBookings.bookingId, bookingId), eq(wlBookings.salonId, salonId)))
+            .limit(1)
+            .for("update")
+        if (!booking) return { error: "not_found" }
+
+        const isCancel = requestType === "cancel"
+        const statusField = isCancel ? "cancelStatus" : "rescheduleStatus"
+        if (booking[statusField] !== "pending") return { error: "no_pending_request" }
+
+        const decision = {
+            [statusField]: action === "approve" ? "approved" : "rejected",
+            [isCancel ? "cancelRespondedDate" : "rescheduleRespondedDate"]: now,
+            [isCancel ? "cancelResponseNote" : "rescheduleResponseNote"]: note ?? null,
+            bookingUpdatedDate: now,
+        }
+
+        if (action === "reject") {
+            await tx.update(wlBookings).set(decision).where(eq(wlBookings.bookingId, bookingId))
+            return { booking: { ...booking, ...decision } }
+        }
+
+        // Only a booking that's still active can be cancelled or moved
+        if (booking.isCancel === "1" || booking.orderStatus !== "Booked") return { error: "booking_closed" }
+
+        if (isCancel) {
+            const values = { ...decision, orderStatus: "Cancelled", isCancel: "1", bookingCancelledDate: now }
+            await tx.update(wlBookings).set(values).where(eq(wlBookings.bookingId, bookingId))
+            await releaseSlotPlace(tx, booking.slotId)
+            return { booking: { ...booking, ...values } }
+        }
+
+        // Reschedule: the requested slot is checked again, as it may have filled up since the request
+        const { error, slot } = await checkRequestedSlot(tx, booking, booking.requestedSlotId, checkSlot)
+        if (error) return { error }
+
+        const values = {
+            ...decision,
+            previousSlotId: booking.slotId,
+            previousSlotDate: booking.slotDate,
+            previousStartTime: booking.startTime,
+            previousEndTime: booking.endTime,
             slotId: slot.slotId,
             slotDate: slot.slotDate,
             startTime: slot.startTime,
             endTime: slot.endTime,
-            bookingUpdatedDate: now,
         }
         await tx.update(wlBookings).set(values).where(eq(wlBookings.bookingId, bookingId))
         await releaseSlotPlace(tx, booking.slotId)
         await tx
             .update(wlBookingSlots)
             .set({ bookedCount: sql`${wlBookingSlots.bookedCount} + 1` })
-            .where(eq(wlBookingSlots.slotId, newSlotId))
+            .where(eq(wlBookingSlots.slotId, slot.slotId))
 
-        return {
-            booking: { ...booking, ...values },
-            previous: { slotId: booking.slotId, slotDate: booking.slotDate, startTime: booking.startTime, endTime: booking.endTime },
-            slot: { ...slot, bookedCount: slot.bookedCount + 1 },
-        }
+        return { booking: { ...booking, ...values }, slot: { ...slot, bookedCount: slot.bookedCount + 1 } }
+    })
+
+// Partner: the salon's cancellation and reschedule requests, newest first.
+//   requestType: 'cancel' | 'reschedule' | undefined (both); status: 'pending' | 'approved' | 'rejected' | undefined (all)
+// A booking with both kinds of request appears once per kind.
+const findSalonRequests = async (salonId, { requestType, status, limit }) => {
+    const kinds = requestType ? [requestType] : ["cancel", "reschedule"]
+    const lists = await Promise.all(kinds.map((kind) => {
+        const statusColumn = kind === "cancel" ? wlBookings.cancelStatus : wlBookings.rescheduleStatus
+        const requestedColumn = kind === "cancel" ? wlBookings.cancelRequestedDate : wlBookings.rescheduleRequestedDate
+        return db
+            .select()
+            .from(wlBookings)
+            .where(and(eq(wlBookings.salonId, salonId), status ? eq(statusColumn, status) : sql`${statusColumn} <> 'none'`))
+            .orderBy(desc(requestedColumn), desc(wlBookings.bookingId))
+            .limit(limit)
+            .then((rows) => rows.map((row) => ({ ...row, requestType: kind, requestedDate: (kind === "cancel" ? row.cancelRequestedDate : row.rescheduleRequestedDate) || "" })))
+    }))
+
+    return lists.flat().sort((a, b) => (a.requestedDate < b.requestedDate ? 1 : a.requestedDate > b.requestedDate ? -1 : 0)).slice(0, limit)
+}
+
+// Pending requests per kind, for the partner Home cards
+const countPendingRequests = async (salonId) => {
+    const [row] = await db
+        .select({
+            cancel: sql`COALESCE(SUM(${wlBookings.cancelStatus} = 'pending'), 0)`.mapWith(Number),
+            reschedule: sql`COALESCE(SUM(${wlBookings.rescheduleStatus} = 'pending'), 0)`.mapWith(Number),
+        })
+        .from(wlBookings)
+        .where(eq(wlBookings.salonId, salonId))
+
+    return row
+}
+
+// Partner: records that a booking was paid, online or in cash. Returns { error } or { booking }
+const recordPayment = async ({ bookingId, salonId, paymentMode, paymentMethod, now }) =>
+    db.transaction(async (tx) => {
+        const [booking] = await tx
+            .select()
+            .from(wlBookings)
+            .where(and(eq(wlBookings.bookingId, bookingId), eq(wlBookings.salonId, salonId)))
+            .limit(1)
+            .for("update")
+        if (!booking) return { error: "not_found" }
+        if (booking.isCancel === "1" || booking.orderStatus === "Cancelled") return { error: "cancelled" }
+        if (booking.paymentStatus === "Paid") return { error: "already_paid" }
+
+        const values = { paymentStatus: "Paid", paymentMode, paymentMethod, paymentReceivedDate: now, bookingUpdatedDate: now }
+        await tx.update(wlBookings).set(values).where(eq(wlBookings.bookingId, bookingId))
+
+        return { booking: { ...booking, ...values } }
     })
 
 // The My Bookings tabs, worked out from the stored status and the slot's end time (salon time):
@@ -267,14 +384,78 @@ const countCustomerBookingsByTab = async (customerId, { today, nowTime }) => {
     return row
 }
 
+// ----- Salon Partner: the salon's own bookings -----
+
+// "50%_off" -> "50\%\_off", so LIKE matches the text literally
+const escapeLike = (value) => value.replace(/[\\%_]/g, (ch) => `\\${ch}`)
+
+// Everything that narrows the partner's list except the tab. salonId always comes from the logged-in partner.
+//   search: "BK-24031" / "24031" (booking ID), or part of the customer's name or the service name
+//   date: one slot date (YYYY-MM-DD); paymentStatus: 'Paid' | 'Unpaid'
+const salonBookingsCondition = (salonId, { search, date, paymentStatus }) => {
+    let searchCondition
+    if (search) {
+        const id = /^(?:bk-?)?(\d+)$/i.exec(search.replace(/\s+/g, ''))
+        const pattern = `%${escapeLike(search)}%`
+        searchCondition = sql`(${id ? sql`${wlBookings.bookingId} = ${Number(id[1])} OR ` : sql``}CONCAT_WS(' ', ${wlBookings.firstName}, ${wlBookings.lastName}) LIKE ${pattern} OR ${wlBookings.serviceName} LIKE ${pattern})`
+    }
+
+    return and(
+        eq(wlBookings.salonId, salonId),
+        searchCondition,
+        date ? eq(wlBookings.slotDate, date) : undefined,
+        paymentStatus ? eq(wlBookings.paymentStatus, paymentStatus) : undefined
+    )
+}
+
+// One page of the salon's bookings for a tab (undefined = All). Upcoming shows the soonest first; the rest the latest first.
+const findSalonBookings = async (salonId, { tab, search, date, paymentStatus, today, nowTime, limit, offset }) =>
+    db
+        .select({ booking: wlBookings, tab: bookingTab(today, nowTime).mapWith(String) })
+        .from(wlBookings)
+        .where(and(salonBookingsCondition(salonId, { search, date, paymentStatus }), tab ? BOOKING_TABS[tab](today, nowTime) : undefined))
+        .orderBy(
+            ...(tab === "upcoming"
+                ? [asc(wlBookings.slotDate), asc(wlBookings.startTime), asc(wlBookings.bookingId)]
+                : [desc(wlBookings.slotDate), desc(wlBookings.startTime), desc(wlBookings.bookingId)])
+        )
+        .limit(limit)
+        .offset(offset)
+        .then((rows) => rows.map(({ booking, ...extra }) => ({ ...booking, ...extra })))
+
+// The numbers on the tabs (All / Upcoming / Completed / Cancelled) for the same search and filters,
+// and the pending request counts for the Reschedule / Cancellations buttons
+const countSalonBookingsByTab = async (salonId, { search, date, paymentStatus, today, nowTime }) => {
+    const [row] = await db
+        .select({
+            upcoming: sql`COALESCE(SUM(${BOOKING_TABS.upcoming(today, nowTime)}), 0)`.mapWith(Number),
+            completed: sql`COALESCE(SUM(${BOOKING_TABS.completed(today, nowTime)}), 0)`.mapWith(Number),
+            cancelled: sql`COALESCE(SUM(${BOOKING_TABS.cancelled()}), 0)`.mapWith(Number),
+            total: count(),
+        })
+        .from(wlBookings)
+        .where(salonBookingsCondition(salonId, { search, date, paymentStatus }))
+
+    return row
+}
+
 module.exports = {
+    findSalonBookings,
+    countSalonBookingsByTab,
     bookSlot,
     findCustomerBooking,
     updateBookingCoupon,
-    cancelBooking,
-    rescheduleBooking,
+    requestCancellation,
+    requestReschedule,
+    respondToRequest,
+    findSalonRequests,
+    countPendingRequests,
+    recordPayment,
     findCustomerBookings,
     countCustomerBookingsByTab,
     // In the order the tabs appear on My Bookings
     BOOKING_TAB_KEYS: ["upcoming", "completed", "cancelled"],
+    // The same tab rules as SQL, for other screens (Salon Partner home)
+    BOOKING_TABS,
+    bookingTab,
 }

@@ -43,15 +43,20 @@ const message = (label, max) =>
 const addComplaintSchema = z.object({
     ...deviceFields,
     salonId: z.coerce.number({ error: 'Please select a salon' }).int().positive('Please select a salon'),
-    // "Order / Booking"
-    orderId: z.coerce.number({ error: 'Please select an order or booking' }).int().positive('Please select an order or booking'),
+    // "Order / Booking": a booking ID from wl_bookings (bookingId is accepted too)
+    orderId: z.coerce.number({ error: 'Please select a booking' }).int().positive('Please select a booking').optional(),
+    bookingId: z.coerce.number({ error: 'Please select a booking' }).int().positive('Please select a booking').optional(),
     subject: z.string({ error: 'Please enter a subject' })
         .trim()
         .min(3, 'Subject must be at least 3 characters')
         .max(150, 'Subject can be up to 150 characters')
         .refine(noMarkup, 'Invalid characters'),
     complaint: message('complaint', 2000),
-}).strict()
+}).strict().superRefine((d, ctx) => {
+    if (d.orderId === undefined && d.bookingId === undefined) {
+        ctx.addIssue({ code: 'custom', path: ['orderId'], message: 'Please select a booking' })
+    }
+})
 
 // Both filters are optional: blank, null or missing means "don't filter by it"
 const listComplaintsSchema = z.object({
@@ -131,13 +136,15 @@ const formatComplaint = (complaint, summary) => {
         complaintId: complaint.complaintId,
         complaintNumber: `CMP-${complaint.complaintId}`,
         orderId: complaint.orderId,
-        // The order / booking number, from wl_orders
-        orderNumber: complaint.orderId ? complaint.invoiceNumber || String(complaint.orderId) : null,
+        // The booking number, from wl_bookings ("BK-12")
+        orderNumber: complaint.orderId ? `BK-${complaint.orderId}` : null,
+        bookingId: complaint.orderId || null,
         order: complaint.orderId
             ? {
                 orderId: complaint.orderId,
                 invoiceNumber: complaint.invoiceNumber,
                 orderStatus: complaint.orderStatus,
+                serviceName: complaint.serviceName,
                 paymentStatus: complaint.paymentStatus,
                 totalAmount: complaint.totalAmount,
                 orderDate: formatDate(complaint.orderReceivedDate),
@@ -224,15 +231,16 @@ const addComplaint = async (req, res) => {
 
         const [salon, order] = await Promise.all([
             complaintModel.findActiveSalon(d.salonId),
-            complaintModel.findCustomerOrder(customer.customerId, d.orderId),
+            complaintModel.findCustomerOrder(customer.customerId, d.bookingId ?? d.orderId),
         ])
 
         if (!salon) {
             return res.status(200).json({ success: false, message: 'Salon not found.' })
         }
 
-        if (!order) {
-            return res.status(200).json({ success: false, message: 'Order not found.' })
+        // The booking must be the customer's own, at the salon the complaint is against
+        if (!order || order.salonId !== salon.salonId) {
+            return res.status(200).json({ success: false, message: 'Booking not found for this salon.' })
         }
 
         const now = authModel.nowString()

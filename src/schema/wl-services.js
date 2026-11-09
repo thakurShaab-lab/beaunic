@@ -10,7 +10,8 @@ const wlServices = mysqlTable("wl_services", {
 	serviceDescription: text("service_description"),                                // New Field    // "What does this service include?"
 	servicePrice: decimal("service_price", { precision: 10, scale: 2 }),            // NULL = "Price not set"
 	serviceDuration: int("service_duration"),                                       // New Field    // Minutes; NULL = "Duration not set"
-	isPopular: mysqlEnum("is_popular", ['0','1']).default('1').notNull(),           // 0=No, 1=Yes
+	serviceDiscountedPrice: decimal("service_discounted_price", { precision: 10, scale: 2 }),  // In the live table (PHP admin); not used by the API yet
+	isPopular: mysqlEnum("is_popular", ['1','0']).default('0').notNull(),           // 1=Yes, 0=No (same order and default as the live table)
 	status: mysqlEnum(['1','0','2']).default('1').notNull(),                        // 1=Active, 0=Inactive, 2=Deleted
 	serviceAddedDate: datetime("service_added_date", { mode: 'string'}),
 	serviceUpdatedDate: datetime("service_updated_date", { mode: 'string'}),

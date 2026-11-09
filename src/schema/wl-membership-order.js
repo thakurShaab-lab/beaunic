@@ -4,11 +4,12 @@ const {
   int,
   varchar,
   text,
-  longblob,
   decimal,
   mysqlEnum,
   datetime,
 } = require('drizzle-orm/mysql-core')
+// drizzle-orm has no longblob column type; the project's own is in custom-types
+const { longblob } = require('./custom-types')
 
 const wlMembershipOrders = mysqlTable('wl_membership_orders', {
   order_id: bigint('order_id', {
