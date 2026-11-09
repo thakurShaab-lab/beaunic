@@ -37,6 +37,10 @@ const wlBookings = mysqlTable("wl_bookings", {
 	startTime: time("start_time").notNull(),                                                      // Slot start time when booked
 	endTime: time("end_time").notNull(),                                                          // Slot end time when booked
 	bookingNotes: text("booking_notes"),                                                          // Optional note from the customer
+	isCancel: mysqlEnum("is_cancel", ['0','1']).default('0').notNull(),                            // 0=Not Cancelled, 1=Cancelled
+	cancelReason: varchar("cancel_reason", { length: 50 }),                                        // change_of_plans, booked_by_mistake, better_time_slot, health_reasons, salon_too_far, other
+	cancelReasonNote: text("cancel_reason_note"),                                                 // What the customer wrote for "Other"
+	refundMethod: mysqlEnum("refund_method", ['original','wallet']),                              // original=Original payment method, wallet=Beaunic Wallet; NULL when nothing was paid
 	bookingCancelledDate: datetime("booking_cancelled_date", { mode: 'string'}),
 	bookingUpdatedDate: datetime("booking_updated_date", { mode: 'string'}),
 },

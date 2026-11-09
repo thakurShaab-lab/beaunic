@@ -10,6 +10,7 @@ const serviceModel = require('../models/service.model')
 const membershipModel = require('../models/membership.model')
 const reviewModel = require('../models/review.model')
 const addressModel = require('../models/address.model')
+const favoriteModel = require('../models/favorite.model')
 const complaintModel = require('../models/complaint.model')
 const { validateRequestDevice } = require('./device&app.controller')
 const { detectImageExt } = require('./auth.controller')
@@ -27,7 +28,18 @@ const SERVICE_IMAGE_DIR = path.join(env.uploadDir, SERVICE_IMAGE_FOLDER)
 const MAX_IMAGES = 3
 
 // Blank form fields are ignored, so an edit clears a saved value by naming it here
-const REMOVABLE_FIELDS = ['price', 'description']
+const REMOVABLE_FIELDS = ['price', 'description', 'duration']
+
+// Longest service: 24 hours, in minutes
+const MAX_DURATION_MINUTES = 1440
+
+// 45 -> "45 min", 60 -> "1 hr", 75 -> "1 hr 15 min", 120 -> "2 hrs"
+const durationLabel = (minutes) => {
+    if (minutes === null || minutes === undefined) return null
+    const hours = Math.floor(minutes / 60)
+    const rest = minutes % 60
+    return [hours ? `${hours} ${hours === 1 ? 'hr' : 'hrs'}` : null, rest ? `${rest} min` : null].filter(Boolean).join(' ')
+}
 
 // The app's toggle may send 1/0, true/false or active/inactive
 const STATUS_VALUES = { '1': '1', true: '1', active: '1', '0': '0', false: '0', inactive: '0' }
@@ -51,6 +63,13 @@ const optionalServiceFields = {
     price: z.coerce.number({ error: 'Price must be a number' })
         .min(0, 'Price cannot be negative')
         .max(99999999.99, 'Price is too large')
+        .nullable()
+        .optional(),
+    // Minutes, e.g. 75 for "1 hr 15 min"; empty means "Duration not set"
+    duration: z.coerce.number({ error: 'Duration must be a number of minutes' })
+        .int('Duration must be a whole number of minutes')
+        .min(1, 'Duration must be at least 1 minute')
+        .max(MAX_DURATION_MINUTES, `Duration can be at most ${MAX_DURATION_MINUTES} minutes (24 hours)`)
         .nullable()
         .optional(),
     status: z.preprocess(
@@ -82,7 +101,7 @@ const updateServiceSchema = z.object({
         z.array(z.enum(REMOVABLE_FIELDS, { error: `Can only remove: ${REMOVABLE_FIELDS.join(', ')}` })).optional()
     ),
 }).strict().superRefine((d, ctx) => {
-    for (const field of ['price', 'description']) {
+    for (const field of REMOVABLE_FIELDS) {
         if (d.removeFields?.includes(field) && d[field] !== undefined && d[field] !== null) {
             ctx.addIssue({ code: 'custom', path: ['removeFields'], message: `Send ${field} or remove it, not both` })
         }
@@ -226,6 +245,9 @@ const formatService = (service, media, category, membershipName) => {
         images,
         price: service.servicePrice,
         priceLabel: service.servicePrice !== null ? `₹${service.servicePrice}` : 'Price not set',
+        // Minutes, and the same as text ("1 hr 15 min")
+        duration: service.serviceDuration ?? null,
+        durationLabel: service.serviceDuration != null ? durationLabel(service.serviceDuration) : 'Duration not set',
         status: service.status,
         statusLabel: service.status === '1' ? 'Active' : 'Inactive',
     }
@@ -271,6 +293,7 @@ const addService = async (req, res) => {
             serviceName: d.serviceName,
             serviceDescription: d.description ?? null,
             servicePrice: d.price != null ? d.price.toFixed(2) : null,
+            serviceDuration: d.duration ?? null,
             status: d.status ?? '1',
             serviceAddedDate: now,
             serviceUpdatedDate: now,
@@ -315,6 +338,7 @@ const updateService = async (req, res) => {
         categoryId: d.categoryId,
         serviceDescription: remove.has('description') ? null : d.description,
         servicePrice: remove.has('price') || d.price === null ? null : d.price?.toFixed(2),
+        serviceDuration: remove.has('duration') || d.duration === null ? null : d.duration,
         status: d.status,
     }
 
@@ -631,11 +655,13 @@ const getServiceDetails = async (req, res) => {
             return res.status(200).json({ success: false, message: 'This salon is not available right now.' })
         }
 
-        const [media, summary, reviewRows, address] = await Promise.all([
+        const [media, summary, reviewRows, address, favorite] = await Promise.all([
             serviceModel.findServiceMedia(serviceId).then((rows) => withImageUrls(req, rows)),
             reviewModel.findServiceRatingSummary(serviceId, salonId),
             reviewModel.findServiceReviews(serviceId, salonId),
             addressModel.findDefaultAddress(salonId),
+            // Whether the logged-in customer saved this service (wl_favorite_services)
+            favoriteModel.findFavorite(customer.customerId, serviceId),
         ])
 
         // Reviewers' photos, checked all at once (null when the file is missing)
@@ -670,6 +696,8 @@ const getServiceDetails = async (req, res) => {
                 serviceId: service.serviceId,
                 title: service.serviceName,
                 categoryName: service.categoryName,
+                // The ♡ next to the title
+                is_favorite: Boolean(favorite),
                 // 5. Ratings & reviews summary
                 ratingSummary,
                 // 6. Price & duration
@@ -710,4 +738,4 @@ const getServiceDetails = async (req, res) => {
     }
 }
 
-module.exports = { addService, updateService, listServices, updateServiceStatus, getServiceDetails, buildSalonLocation, rupees }
+module.exports = { addService, updateService, listServices, updateServiceStatus, getServiceDetails, buildSalonLocation, rupees, withImageUrls, durationLabel }

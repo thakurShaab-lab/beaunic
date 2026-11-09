@@ -251,9 +251,17 @@ const registerFailedAttempt = async (res, customer, message) => {
 const loginDevice = ({ app_id, device_id }) => ({ appId: String(app_id).trim(), deviceId: device_id })
 
 
+// /auth/login's version of sendError: extra keys (customerId, currentStep) go inside "data"
+const sendLoginError = (res, { status, message, ...extra }) =>
+    res.status(status).json({ success: false, message, ...(Object.keys(extra).length && { data: extra }) })
+
+// Login stopped with success: false (pending approval, incomplete profile, ...), but the phone is still
+// saved so the follow-up APIs (onboarding steps, account-status) work from this device.
+// Only /auth/login passes a device; verify-otp / resend-otp (no device) keep the plain sendError shape.
 const sendErrorWithDevice = async (res, customer, device, error) => {
-    if (device) await authModel.updateLoginDevice(customer.customerId, device)
-    return sendError(res, error)
+    if (!device) return sendError(res, error)
+    await authModel.updateLoginDevice(customer.customerId, device)
+    return sendLoginError(res, error)
 }
 
 const completeLogin = async (res, customer, device) => {

@@ -86,6 +86,7 @@ const findCustomerServicesWithCategory = async (
             serviceName: wlServices.serviceName,
             serviceDescription: wlServices.serviceDescription,
             servicePrice: wlServices.servicePrice,
+            serviceDuration: wlServices.serviceDuration,
             status: wlServices.status,
             serviceAddedDate: wlServices.serviceAddedDate,
             serviceUpdatedDate: wlServices.serviceUpdatedDate,
@@ -229,4 +230,8 @@ module.exports = {
     findMediaForServices,
     createServiceWithMedia,
     updateServiceWithMedia,
+    // Per-service average stars / review count subquery and its COALESCEd columns, for other lists to join
+    serviceRatings,
+    averageRating,
+    reviewCount,
 }

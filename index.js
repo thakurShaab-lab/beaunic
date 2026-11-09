@@ -23,6 +23,9 @@ const reviewRoutes = require('./src/routes/review.routes')
 const complaintRoutes = require('./src/routes/complaint.routes')
 const slotRoutes = require('./src/routes/slot.routes')
 const bookingRoutes = require('./src/routes/booking.routes')
+const favoriteRoutes = require('./src/routes/favorite.routes')
+const walletRoutes = require('./src/routes/wallet.routes')
+const referralRoutes = require('./src/routes/referral.routes')
 
 
 const app = express()
@@ -127,6 +130,9 @@ app.use('/api/review', reviewRoutes)
 app.use('/api/complaint', complaintRoutes)
 app.use('/api/slot', slotRoutes)
 app.use('/api/booking', bookingRoutes)
+app.use('/api/favorite', favoriteRoutes)
+app.use('/api/wallet', walletRoutes)
+app.use('/api/referral', referralRoutes)
 
 
 const server = app.listen(env.port, '127.0.0.1', () => {

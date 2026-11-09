@@ -7,7 +7,7 @@ const router = express.Router()
 
 const SERVICE_IMAGES = ['coverImage', { name: 'images', maxCount: 5 }]
 
-const servicePayload = parsePayload(SERVICE_IMAGES, { emptyAsNull: ['price'] })
+const servicePayload = parsePayload(SERVICE_IMAGES, { emptyAsNull: ['price', 'duration'] })
 
 router.post('/add', jwtAuthMiddleware, servicePayload, deviceAuthMiddleware, addService)
 router.post('/update', jwtAuthMiddleware, servicePayload, deviceAuthMiddleware, updateService)

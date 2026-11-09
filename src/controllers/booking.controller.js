@@ -9,7 +9,7 @@ const { validateRequestDevice } = require('./device&app.controller')
 const { findLoggedInCustomer } = require('./profile.controller')
 const { noMarkup } = require('./address.controller')
 const { salonNow, timeLabel, dateParts, hhmm, formatSlot } = require('./slot.controller')
-const { buildSalonLocation, rupees } = require('./service.controller')
+const { buildSalonLocation, rupees, withImageUrls, durationLabel } = require('./service.controller')
 const { convertNulls } = require('../utils/convertNulls')
 
 const SLOT_NOT_AVAILABLE = 'Selected slot is not available.'
@@ -57,8 +57,113 @@ const bookingSummarySchema = z.object({
         .optional(),
 }).strict()
 
+const bookingIdField = z.coerce.number({ error: 'Booking ID is required' }).int().positive('Booking ID is required')
+
+// "Reason for cancellation" options, in screen order
+const CANCEL_REASONS = {
+    change_of_plans: 'Change of plans',
+    booked_by_mistake: 'Booked by mistake',
+    better_time_slot: 'Found a better time slot',
+    health_reasons: 'Health reasons',
+    salon_too_far: 'Salon is too far',
+    other: 'Other',
+}
+
+// "Refund method (if eligible)"
+const REFUND_METHODS = {
+    original: { label: 'Original payment method', description: 'Credited to the source you paid from' },
+    wallet: { label: 'Beaunic Wallet', description: 'Credited to your Beaunic Wallet' },
+}
+
+const CANCELLATION_POLICY = 'Cancellation and refund eligibility are set by the salon. The salon reviews your request, and the outcome appears in Notifications.'
+
+// "Change of plans", "change_of_plans" and "Change Of Plans" are the same; so are "Original payment method" and "original"
+const matchOption = (options) => (value) => {
+    if (typeof value !== 'string') return value
+    const wanted = value.trim().toLowerCase().replace(/[^a-z0-9]/g, '')
+    return Object.keys(options).find((key) => {
+        const label = typeof options[key] === 'string' ? options[key] : options[key].label
+        return [key, label].some((text) => text.toLowerCase().replace(/[^a-z0-9]/g, '') === wanted)
+    }) ?? value
+}
+
+const cancelBookingSchema = z.object({
+    ...deviceFields,
+    bookingId: bookingIdField,
+    cancelReason: z.preprocess(
+        matchOption(CANCEL_REASONS),
+        z.enum(Object.keys(CANCEL_REASONS), {
+            error: (issue) => (issue.input === undefined
+                ? 'Please select a reason for cancellation'
+                : `Reason must be one of: ${Object.values(CANCEL_REASONS).join(', ')}`),
+        })
+    ),
+    // Required when the reason is "Other"
+    cancelReasonNote: z.string()
+        .trim()
+        .max(500, 'Reason can be up to 500 characters')
+        .refine(noMarkup, 'Invalid characters')
+        .optional(),
+    // Optional; only used when the booking was paid. Defaults to the original payment method.
+    refundMethod: z.preprocess(
+        matchOption(REFUND_METHODS),
+        z.enum(Object.keys(REFUND_METHODS), { error: 'Refund method must be original or wallet' }).optional()
+    ),
+}).strict().superRefine((d, ctx) => {
+    if (d.cancelReason === 'other' && !d.cancelReasonNote) {
+        ctx.addIssue({ code: 'custom', path: ['cancelReasonNote'], message: 'Please tell us why you are cancelling' })
+    }
+})
+
+// The new date and time are one of the salon's slots (from /slot/list with the booking's salonId)
+const rescheduleBookingSchema = z.object({
+    ...deviceFields,
+    bookingId: bookingIdField,
+    slotId: z.coerce.number({ error: 'New slot ID is required' }).int().positive('New slot ID is required'),
+}).strict()
+
+// Why a booking can't be cancelled or moved
+const CHANGE_ERRORS = {
+    not_found: 'Booking not found.',
+    cancelled: 'This booking is already cancelled.',
+    closed: 'This booking is closed and can no longer be changed.',
+    started_cancel: 'This booking has already started and can no longer be cancelled.',
+    started_reschedule: 'This booking has already started and can no longer be rescheduled.',
+    same_slot: 'Your booking is already in this slot. Please choose a different date or time.',
+    slot_not_found: 'This slot is not offered by the salon of this booking.',
+    started: 'This slot has already started. Please choose another slot.',
+    already_booked: 'You already have a booking in this slot.',
+    full: SLOT_NOT_AVAILABLE,
+}
+
+const DEFAULT_PAGE_SIZE = 10
+const MAX_PAGE_SIZE = 50
+
+// The My Bookings tabs; "All" or blank means every booking
+const TAB_LABELS = { upcoming: 'Upcoming', completed: 'Completed', cancelled: 'Cancelled' }
+
+// tab, page and limit are optional: blank, null or missing means all tabs, page 1 of 10
+const listBookingsSchema = z.object({
+    ...deviceFields,
+    tab: z.preprocess(
+        (value) => (typeof value === 'string' ? (value.trim().toLowerCase() === 'all' ? undefined : value.trim().toLowerCase()) : value),
+        z.enum(bookingModel.BOOKING_TAB_KEYS, { error: 'Tab must be one of: upcoming, completed, cancelled' }).optional()
+    ),
+    page: z.coerce.number({ error: 'Page must be a number' }).int('Page must be a whole number').min(1, 'Page must be 1 or more').optional(),
+    limit: z.coerce.number({ error: 'Limit must be a number' })
+        .int('Limit must be a whole number')
+        .min(1, 'Limit must be 1 or more')
+        .max(MAX_PAGE_SIZE, `Limit can be at most ${MAX_PAGE_SIZE}`)
+        .optional(),
+}).strict()
+
+const bookingDetailsSchema = z.object({
+    ...deviceFields,
+    bookingId: z.coerce.number({ error: 'Booking ID is required' }).int().positive('Booking ID is required'),
+}).strict()
+
 // The badge under the service name and the "Service type" line
-const SERVICE_TYPE_LABELS = { salon: 'At Salon', home_service: 'At Home' }
+const SERVICE_TYPE_LABELS = { salon: 'At Salon', home_service: 'Home Service' }
 
 const SUMMARY_NOTE = 'Final price, discounts and charges are confirmed by the salon. Cancellation and rescheduling follow the salon\'s policy.'
 
@@ -378,4 +483,449 @@ const getBookingSummary = async (req, res) => {
     }
 }
 
-module.exports = { createBooking, getBookingSummary }
+// Only a "Booked" booking whose time hasn't come yet can be cancelled or moved.
+// action: 'cancel' | 'reschedule', for the "already started" message
+const bookingChangeError = (booking, action) => {
+    if (booking.isCancel === '1' || booking.orderStatus === 'Cancelled') return 'cancelled'
+    if (booking.orderStatus !== 'Booked') return 'closed'
+    if (hasStarted(booking)) return `started_${action}`
+    return null
+}
+
+const sendChangeError = (res, code) => res.status(200).json({ success: false, message: CHANGE_ERRORS[code] })
+
+// "Cancel Booking": the customer's own upcoming booking, with a reason and (for paid bookings) a refund method;
+// its place in the slot is freed
+const cancelBooking = async (req, res) => {
+    if (!(await validateRequestDevice(req, res))) return
+
+    const parsed = cancelBookingSchema.safeParse(req.body)
+
+    if (!parsed.success) return sendValidationError(res, parsed.error)
+
+    const d = parsed.data
+
+    try {
+        const customer = await findUser(req, res, d)
+        if (!customer) return
+
+        const result = await bookingModel.cancelBooking({
+            bookingId: d.bookingId,
+            customerId: customer.customerId,
+            checkBooking: (booking) => bookingChangeError(booking, 'cancel'),
+            cancellation: (booking) => ({
+                cancelReason: d.cancelReason,
+                // The note is kept for "Other"; for the fixed reasons it's optional extra detail
+                cancelReasonNote: d.cancelReasonNote || null,
+                // Nothing to refund on an unpaid booking
+                refundMethod: booking.paymentStatus === 'Paid' ? d.refundMethod ?? 'original' : null,
+            }),
+            now: authModel.nowString(),
+        })
+
+        if (result.error) return sendChangeError(res, result.error)
+
+        const booking = result.booking
+        const refundMethod = booking.refundMethod ? REFUND_METHODS[booking.refundMethod] : null
+
+        return res.status(200).json({
+            success: true,
+            message: 'Booking cancelled successfully',
+            data: convertNulls({
+                bookingId: booking.bookingId,
+                bookingNumber: bookingNumber(booking.bookingId),
+                invoiceNumber: booking.invoiceNumber,
+                bookingStatus: booking.orderStatus,
+                isCancel: booking.isCancel,
+                paymentStatus: booking.paymentStatus,
+                serviceId: booking.serviceId,
+                serviceName: booking.serviceName,
+                salonId: booking.salonId,
+                slotId: booking.slotId,
+                slotDate: booking.slotDate,
+                dateLabel: dateParts(booking.slotDate).label,
+                timeLabel: `${timeLabel(booking.startTime)} – ${timeLabel(booking.endTime)}`,
+                amount: Number(booking.totalAmount),
+                amountLabel: rupees(booking.totalAmount),
+                cancelReason: booking.cancelReason,
+                cancelReasonLabel: CANCEL_REASONS[booking.cancelReason],
+                cancelReasonNote: booking.cancelReasonNote,
+                // Refunds are decided by the salon; this is only where it would go
+                refund: {
+                    isEligible: booking.paymentStatus === 'Paid',
+                    method: booking.refundMethod,
+                    methodLabel: refundMethod ? refundMethod.label : null,
+                    status: booking.paymentStatus === 'Paid' ? 'Pending salon review' : 'Not applicable (not paid)',
+                },
+                cancellationPolicy: CANCELLATION_POLICY,
+                cancelledDate: booking.bookingCancelledDate,
+            }),
+        })
+    } catch (err) {
+        console.error('Cancel booking error:', err)
+        return res.status(200).json({ success: false, message: 'Something went wrong' })
+    }
+}
+
+// "Reschedule": moves the customer's own upcoming booking to another slot of the same salon.
+// Price and coupon stay as they are.
+const rescheduleBooking = async (req, res) => {
+    if (!(await validateRequestDevice(req, res))) return
+
+    const parsed = rescheduleBookingSchema.safeParse(req.body)
+
+    if (!parsed.success) return sendValidationError(res, parsed.error)
+
+    try {
+        const customer = await findUser(req, res, parsed.data)
+        if (!customer) return
+
+        const result = await bookingModel.rescheduleBooking({
+            bookingId: parsed.data.bookingId,
+            customerId: customer.customerId,
+            newSlotId: parsed.data.slotId,
+            checkBooking: (booking) => bookingChangeError(booking, 'reschedule'),
+            checkSlot: (slot) => (hasStarted(slot) ? 'started' : null),
+            now: authModel.nowString(),
+        })
+
+        if (result.error) return sendChangeError(res, result.error)
+
+        const { booking, previous } = result
+        const scheduleOf = (row) => ({
+            slotId: row.slotId,
+            slotDate: row.slotDate,
+            dateLabel: dateParts(row.slotDate).label,
+            startTime: hhmm(row.startTime),
+            endTime: hhmm(row.endTime),
+            timeLabel: `${timeLabel(row.startTime)} – ${timeLabel(row.endTime)}`,
+        })
+
+        return res.status(200).json({
+            success: true,
+            message: 'Booking rescheduled successfully',
+            data: convertNulls({
+                bookingId: booking.bookingId,
+                invoiceNumber: booking.invoiceNumber,
+                bookingStatus: booking.orderStatus,
+                serviceId: booking.serviceId,
+                serviceName: booking.serviceName,
+                salonId: booking.salonId,
+                totalAmount: booking.totalAmount,
+                previousSchedule: scheduleOf(previous),
+                newSchedule: scheduleOf(booking),
+                // The new slot after this booking, so the app can refresh its badge
+                slot: formatSlot(result.slot),
+            }),
+        })
+    } catch (err) {
+        console.error('Reschedule booking error:', err)
+        return res.status(200).json({ success: false, message: 'Something went wrong' })
+    }
+}
+
+// "BK-30418": the booking number on the cards
+const bookingNumber = (bookingId) => `BK-${bookingId}`
+
+// "2026-10-07" or "2026-10-07 11:00:00" -> "07 Oct 2026"
+const shortDate = (value) => {
+    const date = String(value).slice(0, 10)
+    const parts = dateParts(date)
+    return `${parts.dayNumber} ${parts.month} ${date.slice(0, 4)}`
+}
+
+// Saved times are UTC (authModel.nowString); shown in salon time: "2026-10-06 18:30:00" -> "07 Oct 2026 · 12:00 AM"
+const salonDateTimeLabel = (utcDateTime) => {
+    const date = new Date(`${String(utcDateTime).replace(' ', 'T')}Z`)
+    if (Number.isNaN(date.getTime())) return null
+    const parts = Object.fromEntries(
+        new Intl.DateTimeFormat('en-CA', {
+            timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+        }).formatToParts(date).map((part) => [part.type, part.value])
+    )
+    return `${shortDate(`${parts.year}-${parts.month}-${parts.day}`)} · ${timeLabel(`${parts.hour}:${parts.minute}`)}`
+}
+
+// "Paid · UPI", or just "Unpaid" when no method was recorded
+const paymentLabel = (booking) => [booking.paymentStatus, booking.paymentMethod].filter(Boolean).join(' · ')
+
+// Fields shared by the list card and the details screen
+const bookingBasics = (booking, tab) => {
+    const typeKey = booking.serviceType || booking.salonType
+    const typeLabel = SERVICE_TYPE_LABELS[typeKey] || null
+    const duration = booking.serviceDuration ?? null
+    const upcoming = tab === 'upcoming'
+
+    return {
+        bookingId: booking.bookingId,
+        bookingNumber: bookingNumber(booking.bookingId),
+        invoiceNumber: booking.invoiceNumber,
+        // The badge: Upcoming / Completed / Cancelled
+        status: tab,
+        statusLabel: TAB_LABELS[tab] || booking.orderStatus,
+        orderStatus: booking.orderStatus,
+        isCancel: booking.isCancel,
+        serviceId: booking.serviceId,
+        serviceName: booking.serviceName,
+        serviceType: typeKey,
+        serviceTypeLabel: typeLabel,
+        salonId: booking.salonId,
+        salonName: booking.salonName,
+        // "Beaunic Salon Academy · At Salon"
+        subtitle: [booking.salonName, typeLabel].filter(Boolean).join(' · ') || null,
+        slotId: booking.slotId,
+        bookingDate: booking.slotDate,
+        bookingDateLabel: shortDate(booking.slotDate),
+        startTime: hhmm(booking.startTime),
+        endTime: hhmm(booking.endTime),
+        timeLabel: timeLabel(booking.startTime),
+        // Minutes from the service (bookings don't store one); null when the service has none
+        duration,
+        durationLabel: duration !== null ? durationLabel(duration) : null,
+        amount: Number(booking.totalAmount),
+        amountLabel: rupees(booking.totalAmount),
+        paymentStatus: booking.paymentStatus,
+        paymentMethod: booking.paymentMethod,
+        // The Reschedule / Cancel buttons: only for upcoming bookings whose time hasn't started
+        canReschedule: upcoming && !hasStarted(booking),
+        canCancel: upcoming && !hasStarted(booking),
+    }
+}
+
+// Which tab a single booking belongs to (the same rules as the list's SQL)
+const tabOf = (booking) => {
+    if (booking.isCancel === '1' || booking.orderStatus === 'Cancelled') return 'cancelled'
+    if (['Completed', 'No Show'].includes(booking.orderStatus)) return 'completed'
+    if (booking.orderStatus !== 'Booked') return 'other'
+    const now = salonNow()
+    const ended = booking.slotDate < now.date || (booking.slotDate === now.date && hhmm(booking.endTime) <= now.time)
+    return ended ? 'completed' : 'upcoming'
+}
+
+// The Status card on Booking Details
+const buildTimeline = (booking, tab) => {
+    const paid = booking.paymentStatus === 'Paid'
+    const placed = {
+        key: 'placed',
+        title: 'Booking placed',
+        subtitle: paid ? 'Payment received' : 'Payment pending',
+        isDone: true,
+        date: booking.orderReceivedDate,
+    }
+
+    // Slots are confirmed as soon as they're booked
+    const confirmed = { key: 'confirmed', title: 'Booking confirmed', subtitle: booking.salonName ? `By ${booking.salonName}` : 'Confirmed', isDone: true, date: booking.orderReceivedDate }
+
+    // Booking placed → Booking confirmed → Cancellation requested (the step in progress) → Service completed (Pending)
+    if (tab === 'cancelled') {
+        return [
+            placed,
+            confirmed,
+            {
+                key: 'cancellation_requested',
+                title: 'Cancellation requested',
+                // "07 Oct 2026 · 12:00 AM": when the customer cancelled
+                subtitle: booking.bookingCancelledDate ? salonDateTimeLabel(booking.bookingCancelledDate) : 'Requested',
+                // Hollow on the screen: the salon still reviews it (refund outcome comes in Notifications)
+                isDone: false,
+                isCurrent: true,
+                date: booking.bookingCancelledDate,
+            },
+            { key: 'completed', title: 'Service completed', subtitle: 'Pending', isDone: false, date: null },
+        ]
+    }
+
+    const completed = tab === 'completed'
+    return [
+        placed,
+        confirmed,
+        {
+            key: 'service_day',
+            title: 'Service day',
+            subtitle: `${shortDate(booking.slotDate)} · ${timeLabel(booking.startTime)}`,
+            isDone: hasStarted(booking),
+            date: booking.slotDate,
+        },
+        {
+            key: 'completed',
+            title: 'Service completed',
+            subtitle: completed ? (booking.orderStatus === 'No Show' ? 'No show' : 'Completed') : 'Pending',
+            isDone: completed,
+            date: null,
+        },
+    ]
+}
+
+// Booking Details of a cancelled booking: the "Cancellation Requested" badge, what was chosen on the
+// Cancel Booking screen, and the Invoice row
+const cancellationDetails = (booking) => {
+    const paid = booking.paymentStatus === 'Paid'
+    const refundMethod = booking.refundMethod ? REFUND_METHODS[booking.refundMethod] : null
+
+    return {
+        statusLabel: 'Cancellation Requested',
+        cancellation: {
+            isCancelled: true,
+            isCancel: booking.isCancel,
+            status: 'requested',
+            statusLabel: 'Cancellation Requested',
+            cancelReason: booking.cancelReason,
+            cancelReasonLabel: CANCEL_REASONS[booking.cancelReason] || null,
+            cancelReasonNote: booking.cancelReasonNote,
+            cancelledDate: booking.bookingCancelledDate,
+            cancelledDateLabel: booking.bookingCancelledDate ? salonDateTimeLabel(booking.bookingCancelledDate) : null,
+            refund: {
+                isEligible: paid,
+                method: booking.refundMethod,
+                methodLabel: refundMethod ? refundMethod.label : null,
+                methodDescription: refundMethod ? refundMethod.description : null,
+                status: paid ? 'Pending salon review' : 'Not applicable (not paid)',
+            },
+            cancellationPolicy: CANCELLATION_POLICY,
+        },
+        // "Invoice · INV-BK-30418"
+        invoice: {
+            invoiceNumber: `INV-${bookingNumber(booking.bookingId)}`,
+            label: 'Invoice',
+        },
+    }
+}
+
+// Cover image of each service, as on the service cards
+const coverImages = async (req, serviceIds) => {
+    const media = await withImageUrls(req, await serviceModel.findMediaForServices([...new Set(serviceIds)]))
+    const covers = new Map()
+    for (const row of media) if (!covers.has(row.serviceId)) covers.set(row.serviceId, row.url)
+    return covers
+}
+
+// "My Bookings": the logged-in User's bookings, one tab at a time, with the count for every tab
+const listBookings = async (req, res) => {
+    if (!(await validateRequestDevice(req, res))) return
+
+    const parsed = listBookingsSchema.safeParse(req.body)
+
+    if (!parsed.success) return sendValidationError(res, parsed.error)
+
+    const { tab } = parsed.data
+    const page = parsed.data.page ?? 1
+    const limit = parsed.data.limit ?? DEFAULT_PAGE_SIZE
+
+    try {
+        // Only the logged-in User's own bookings (customer ID from the token, never the body)
+        const customer = await findUser(req, res, parsed.data)
+        if (!customer) return
+
+        const now = salonNow()
+        const clock = { today: now.date, nowTime: `${now.time}:00` }
+        const [counts, rows] = await Promise.all([
+            bookingModel.countCustomerBookingsByTab(customer.customerId, clock),
+            bookingModel.findCustomerBookings(customer.customerId, { tab, ...clock, limit, offset: (page - 1) * limit }),
+        ])
+
+        const covers = await coverImages(req, rows.map((row) => row.serviceId))
+        const total = tab ? counts[tab] : counts.total
+        const totalPages = Math.ceil(total / limit)
+
+        return res.status(200).json({
+            success: true,
+            message: rows.length
+                ? 'Bookings fetched successfully'
+                : total ? 'No more bookings' : tab ? `No ${TAB_LABELS[tab].toLowerCase()} bookings` : 'No bookings yet',
+            data: convertNulls({
+                // The tabs with their numbers: "Upcoming 2 · Completed 2 · Cancelled 1"
+                tabs: bookingModel.BOOKING_TAB_KEYS.map((key) => ({ key, label: TAB_LABELS[key], count: counts[key], isSelected: key === tab })),
+                selectedTab: tab ?? null,
+                bookings: rows.map((row) => ({
+                    ...bookingBasics(row, row.tab),
+                    imageUrl: covers.get(row.serviceId) || null,
+                })),
+                pagination: { page, limit, total, totalPages, hasNextPage: page < totalPages },
+            }),
+        })
+    } catch (err) {
+        console.error('List bookings error:', err)
+        return res.status(200).json({ success: false, message: 'Something went wrong' })
+    }
+}
+
+// "Booking Details": one of the logged-in User's bookings
+const getBookingDetails = async (req, res) => {
+    if (!(await validateRequestDevice(req, res))) return
+
+    const parsed = bookingDetailsSchema.safeParse(req.body)
+
+    if (!parsed.success) return sendValidationError(res, parsed.error)
+
+    try {
+        const customer = await findUser(req, res, parsed.data)
+        if (!customer) return
+
+        // Looked up by booking ID and the logged-in customer together, so other people's bookings are "not found"
+        const booking = await bookingModel.findCustomerBooking(customer.customerId, parsed.data.bookingId)
+        if (!booking) return res.status(200).json({ success: false, message: 'Booking not found.' })
+
+        const tab = tabOf(booking)
+        const [address, covers] = await Promise.all([
+            addressModel.findDefaultAddress(booking.salonId),
+            coverImages(req, [booking.serviceId]),
+        ])
+        const basics = bookingBasics(booking, tab)
+        const location = buildSalonLocation(booking.salonId, booking.salonName, address)
+        const pricePaise = toPaise(booking.servicePrice)
+        const discountPaise = toPaise(booking.couponDiscountAmount || 0)
+
+        return res.status(200).json({
+            success: true,
+            message: 'Booking details fetched successfully',
+            data: convertNulls({
+                ...basics,
+                imageUrl: covers.get(booking.serviceId) || null,
+                // Header line: "09 Oct 2026 · 11:00 AM · At Salon"
+                headerSubtitle: [basics.bookingDateLabel, basics.timeLabel, basics.serviceTypeLabel].filter(Boolean).join(' · '),
+                timeline: buildTimeline(booking, tab),
+                // The details card, row by row
+                details: {
+                    bookingId: basics.bookingNumber,
+                    salon: booking.salonName,
+                    // No employees/artists are stored yet
+                    employee: null,
+                    dateAndSlot: `${basics.bookingDateLabel} · ${basics.timeLabel}`,
+                    payment: paymentLabel(booking),
+                    amount: basics.amountLabel,
+                },
+                price: {
+                    servicePrice: fromPaise(pricePaise),
+                    discount: fromPaise(discountPaise),
+                    couponCode: booking.discountCouponCode || null,
+                    totalAmount: basics.amount,
+                    totalAmountLabel: basics.amountLabel,
+                },
+                // "At Salon address" card
+                address: {
+                    label: basics.serviceTypeLabel ? `${basics.serviceTypeLabel} address` : 'Address',
+                    ...location,
+                    // "Beaunic Salon Academy, Main Market, Dildarnagar, Uttar Pradesh 232326"
+                    fullAddressWithName: [booking.salonName, location.fullAddress].filter(Boolean).join(', ') || null,
+                },
+                // No employees/artists (or their ratings) are stored yet
+                employee: null,
+                customer: {
+                    customerId: booking.customerId,
+                    name: [booking.firstName, booking.lastName].filter(Boolean).join(' ').trim() || null,
+                    mobileNumber: booking.mobileNumber,
+                    email: booking.email,
+                },
+                notes: booking.bookingNotes,
+                bookedOn: booking.orderReceivedDate,
+                // Only for a cancelled booking; everything above stays as it is otherwise
+                ...(tab === 'cancelled' && cancellationDetails(booking)),
+            }),
+        })
+    } catch (err) {
+        console.error('Booking details error:', err)
+        return res.status(200).json({ success: false, message: 'Something went wrong' })
+    }
+}
+
+module.exports = { createBooking, getBookingSummary, cancelBooking, rescheduleBooking, listBookings, getBookingDetails }
