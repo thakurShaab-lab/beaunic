@@ -3,10 +3,13 @@ const { sendValidationError } = require('../utils/validationError')
 const authModel = require('../models/auth.model')
 const serviceModel = require('../models/service.model')
 const bookingModel = require('../models/booking.model')
+const couponModel = require('../models/coupon.model')
+const addressModel = require('../models/address.model')
 const { validateRequestDevice } = require('./device&app.controller')
 const { findLoggedInCustomer } = require('./profile.controller')
 const { noMarkup } = require('./address.controller')
 const { salonNow, timeLabel, dateParts, hhmm, formatSlot } = require('./slot.controller')
+const { buildSalonLocation, rupees } = require('./service.controller')
 const { convertNulls } = require('../utils/convertNulls')
 
 const SLOT_NOT_AVAILABLE = 'Selected slot is not available.'
@@ -39,6 +42,26 @@ const createBookingSchema = z.object({
         .optional(),
 }).strict()
 
+const bookingSummarySchema = z.object({
+    ...deviceFields,
+    // The booking made by /booking/create (wl_bookings.booking_id)
+    bookingId: z.coerce.number({ error: 'Booking ID is required' }).int().positive('Booking ID is required'),
+    // Must be the booking's own service and salon
+    serviceId: z.coerce.number({ error: 'Service ID is required' }).int().positive('Service ID is required'),
+    salonId: z.coerce.number({ error: 'Salon ID is required' }).int().positive('Salon ID is required'),
+    // Optional: blank, null or missing means no coupon
+    couponCode: z.string({ error: 'Coupon code must be text' })
+        .trim()
+        .max(10, 'Invalid coupon code.')
+        .regex(/^[A-Za-z0-9]+$/, 'Invalid coupon code.')
+        .optional(),
+}).strict()
+
+// The badge under the service name and the "Service type" line
+const SERVICE_TYPE_LABELS = { salon: 'At Salon', home_service: 'At Home' }
+
+const SUMMARY_NOTE = 'Final price, discounts and charges are confirmed by the salon. Cancellation and rescheduling follow the salon\'s policy.'
+
 // Booking is for Users (customer_type 2)
 const findUser = async (req, res, data) => {
     const customer = await findLoggedInCustomer(req, res, data)
@@ -56,6 +79,75 @@ const findUser = async (req, res, data) => {
 const hasStarted = (slot) => {
     const now = salonNow()
     return slot.slotDate < now.date || (slot.slotDate === now.date && hhmm(slot.startTime) <= now.time)
+}
+
+// The service must be active, offered by an active, approved salon (the one sent, if any) and have a price.
+// Replies and returns null when it can't be booked.
+const findBookableService = async (res, { serviceId, salonId }) => {
+    const service = await serviceModel.findActiveServiceWithSalon(serviceId)
+    if (
+        !service ||
+        service.salonCustomerType !== '1' ||
+        service.salonStatus !== '1' ||
+        (salonId !== undefined && salonId !== service.customerId)
+    ) {
+        res.status(200).json({ success: false, message: 'Service not found.' })
+        return null
+    }
+
+    if (service.servicePrice === null) {
+        res.status(200).json({ success: false, message: 'This service can\'t be booked yet because its price is not set.' })
+        return null
+    }
+
+    return service
+}
+
+// Amounts are worked out in paise so rounding never drifts: "1699.00" -> 169900
+const toPaise = (value) => Math.round(Number(value) * 100)
+const fromPaise = (paise) => Number((paise / 100).toFixed(2))
+
+// coupon_type: p = percentage, a = flat amount, f = free shipping (nothing to ship, so not for bookings)
+const COUPON_TYPES = { p: 'percentage', a: 'amount', f: 'free_shipping' }
+
+// Checks a coupon for this customer and price. Returns { error } or { coupon, discountPaise }.
+// The discount never exceeds maximum_coupon_discount (when set) or the price itself.
+// bookingId: the booking it's applied to, which doesn't count as an earlier use
+const applyCoupon = async (couponCode, customerId, pricePaise, bookingId) => {
+    const coupon = await couponModel.findCouponByCode(couponCode)
+    if (!coupon) return { error: 'Invalid coupon code.' }
+    // Found, but switched off in the admin panel (status 0)
+    if (coupon.status !== '1') return { error: 'This coupon is not active.' }
+
+    const today = salonNow().date
+    if (coupon.startDate && coupon.startDate > today) return { error: 'This coupon is not active yet.' }
+    if (coupon.endDate && coupon.endDate < today) return { error: 'This coupon has expired.' }
+
+    if (coupon.couponType === 'f') return { error: 'This coupon can\'t be used for bookings.' }
+
+    const minimumPaise = toPaise(coupon.minimumOrderAmount)
+    if (pricePaise < minimumPaise) {
+        return { error: `This coupon needs a minimum booking amount of ${rupees(fromPaise(minimumPaise))}.` }
+    }
+
+    if (coupon.couponFor === '1' && !(await couponModel.isCouponSentToCustomer(coupon.couponId, customerId))) {
+        return { error: 'This coupon is not available for your account.' }
+    }
+
+    // single: once per customer; multiple: usage_count times per customer
+    const allowedUses = coupon.couponUsage === 'single' ? 1 : Math.max(coupon.usageCount, 1)
+    if ((await couponModel.countCustomerCouponUses(coupon.couponId, customerId, bookingId)) >= allowedUses) {
+        return { error: 'You have already used this coupon the maximum number of times.' }
+    }
+
+    const valuePaise = toPaise(coupon.couponDiscount)
+    let discountPaise = coupon.couponType === 'p' ? Math.round((pricePaise * Number(coupon.couponDiscount)) / 100) : valuePaise
+
+    const maximumPaise = toPaise(coupon.maximumCouponDiscount)
+    if (maximumPaise > 0) discountPaise = Math.min(discountPaise, maximumPaise)
+    discountPaise = Math.min(discountPaise, pricePaise)
+
+    return { coupon, discountPaise }
 }
 
 const formatBooking = (booking, salonName) => ({
@@ -94,20 +186,8 @@ const createBooking = async (req, res) => {
         const customer = await findUser(req, res, d)
         if (!customer) return
 
-        // The service must be active and offered by an active, approved salon
-        const service = await serviceModel.findActiveServiceWithSalon(d.serviceId)
-        if (
-            !service ||
-            service.salonCustomerType !== '1' ||
-            service.salonStatus !== '1' ||
-            (d.salonId !== undefined && d.salonId !== service.customerId)
-        ) {
-            return res.status(200).json({ success: false, message: 'Service not found.' })
-        }
-
-        if (service.servicePrice === null) {
-            return res.status(200).json({ success: false, message: 'This service can\'t be booked yet because its price is not set.' })
-        }
+        const service = await findBookableService(res, d)
+        if (!service) return
 
         const now = authModel.nowString()
         const result = await bookingModel.bookSlot({
@@ -161,4 +241,141 @@ const createBooking = async (req, res) => {
     }
 }
 
-module.exports = { createBooking }
+// "Booking Summary" (step 3 of 4): a booking from wl_bookings — its service, slot, salon and price — with an
+// optional coupon. The coupon (or no coupon) and the amount payable are saved on the booking for the payment step.
+const getBookingSummary = async (req, res) => {
+    if (!(await validateRequestDevice(req, res))) return
+
+    const parsed = bookingSummarySchema.safeParse(req.body)
+
+    if (!parsed.success) return sendValidationError(res, parsed.error)
+
+    const d = parsed.data
+
+    try {
+        const customer = await findUser(req, res, d)
+        if (!customer) return
+
+        const booking = await bookingModel.findCustomerBooking(customer.customerId, d.bookingId)
+        if (!booking || booking.serviceId !== d.serviceId || booking.salonId !== d.salonId) {
+            return res.status(200).json({ success: false, message: 'Booking not found.' })
+        }
+
+        // Only a booking still waiting for payment has a summary to pay
+        if (booking.orderStatus !== 'Booked') {
+            return res.status(200).json({ success: false, message: `This booking is ${booking.orderStatus.toLowerCase()}.` })
+        }
+        if (booking.paymentStatus === 'Paid') {
+            return res.status(200).json({ success: false, message: 'This booking has already been paid.' })
+        }
+
+        const salonId = booking.salonId
+        // The price saved when the booking was made
+        const pricePaise = toPaise(booking.servicePrice)
+        let coupon = null
+        let discountPaise = 0
+
+        // Only checked when a code is sent; a bad code is an error, never a silent "no discount"
+        if (d.couponCode !== undefined) {
+            const result = await applyCoupon(d.couponCode, customer.customerId, pricePaise, booking.bookingId)
+            if (result.error) {
+                return res.status(200).json({ success: false, message: result.error, field: 'couponCode' })
+            }
+            coupon = result.coupon
+            discountPaise = result.discountPaise
+        }
+
+        const totalPaise = pricePaise - discountPaise
+
+        // The booking keeps the coupon shown here (or none) and what is payable now
+        await bookingModel.updateBookingCoupon(booking.bookingId, {
+            discountCouponId: coupon ? coupon.couponId : 0,
+            discountCouponCode: coupon ? coupon.couponCode : null,
+            couponDiscountAmount: coupon ? fromPaise(discountPaise) : null,
+            totalAmount: fromPaise(totalPaise).toFixed(2),
+            bookingUpdatedDate: authModel.nowString(),
+        })
+
+        const address = await addressModel.findDefaultAddress(salonId)
+        const location = buildSalonLocation(salonId, booking.salonName, address)
+        const typeKey = booking.serviceType || booking.salonType
+        const typeLabel = SERVICE_TYPE_LABELS[typeKey] || null
+        const date = dateParts(booking.slotDate)
+
+        return res.status(200).json({
+            success: true,
+            message: coupon ? 'Coupon applied successfully' : 'Booking summary fetched successfully',
+            data: convertNulls({
+                step: { current: 3, total: 4 },
+                bookingId: booking.bookingId,
+                serviceId: booking.serviceId,
+                salonId: booking.salonId,
+                booking: {
+                    bookingId: booking.bookingId,
+                    invoiceNumber: booking.invoiceNumber,
+                    bookingStatus: booking.orderStatus,
+                    paymentStatus: booking.paymentStatus,
+                    notes: booking.bookingNotes,
+                },
+                service: {
+                    serviceId: booking.serviceId,
+                    serviceName: booking.serviceName,
+                    // No duration is stored for services yet
+                    duration: null,
+                    serviceType: typeKey,
+                    serviceTypeLabel: typeLabel,
+                    // "1 hr 15 min · At Salon" once a duration exists
+                    subtitle: typeLabel,
+                },
+                schedule: {
+                    slotId: booking.slotId,
+                    date: booking.slotDate,
+                    dateLabel: date.label,
+                    startTime: hhmm(booking.startTime),
+                    endTime: hhmm(booking.endTime),
+                    timeLabel: timeLabel(booking.startTime),
+                    timeRangeLabel: `${timeLabel(booking.startTime)} – ${timeLabel(booking.endTime)}`,
+                },
+                salon: {
+                    ...location,
+                    // "Main Market, Dildarnagar": the line on the card
+                    shortAddress: address ? [address.address, address.city].map((part) => part && part.trim()).filter(Boolean).join(', ') || null : null,
+                },
+                coupon: coupon
+                    ? {
+                        applied: true,
+                        couponId: coupon.couponId,
+                        couponCode: coupon.couponCode,
+                        couponTitle: coupon.couponTitle,
+                        couponType: COUPON_TYPES[coupon.couponType],
+                        couponValue: Number(coupon.couponDiscount),
+                        couponValueLabel: coupon.couponType === 'p' ? `${Number(coupon.couponDiscount)}% off` : `${rupees(coupon.couponDiscount)} off`,
+                        maximumDiscount: coupon.maximumCouponDiscount > 0 ? Number(coupon.maximumCouponDiscount) : null,
+                        discountAmount: fromPaise(discountPaise),
+                        label: `Applied (${coupon.couponCode})`,
+                    }
+                    : { applied: false, couponCode: null, discountAmount: 0, label: 'Not applied' },
+                // The "Price Details" card, row by row
+                priceDetails: {
+                    servicePrice: fromPaise(pricePaise),
+                    servicePriceLabel: rupees(fromPaise(pricePaise)),
+                    discount: fromPaise(discountPaise),
+                    discountLabel: discountPaise > 0 ? `− ${rupees(fromPaise(discountPaise))}` : rupees(0),
+                    couponLabel: coupon ? `Applied (${coupon.couponCode})` : 'Not applied',
+                    taxesAndCharges: null,
+                    taxesAndChargesLabel: 'As applicable',
+                    totalPayable: fromPaise(totalPaise),
+                    totalPayableLabel: rupees(fromPaise(totalPaise)),
+                },
+                totalPayable: fromPaise(totalPaise),
+                totalPayableLabel: rupees(fromPaise(totalPaise)),
+                note: SUMMARY_NOTE,
+            }),
+        })
+    } catch (err) {
+        console.error('Booking summary error:', err)
+        return res.status(200).json({ success: false, message: 'Something went wrong' })
+    }
+}
+
+module.exports = { createBooking, getBookingSummary }

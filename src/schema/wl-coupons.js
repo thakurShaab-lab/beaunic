@@ -22,4 +22,4 @@ const wlCoupons = mysqlTable("wl_coupons", {
 	primaryKey({ columns: [table.couponId], name: "wl_coupons_coupon_id"}),
 ]);
 
-module.exports = { wlCoupons };
+module.exports = { wlCoupons }; 

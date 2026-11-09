@@ -20,7 +20,7 @@ const UPLOAD_DIR = path.join(env.uploadDir, 'salon_logos')
 const OTP_EXPIRY_MINUTES = 5
 const OTP_RESEND_COOLDOWN_SECONDS = 60
 const MAX_LOGIN_TRIES = 5
-const LOGIN_BLOCK_MINUTES = 30
+const LOGIN_BLOCK_MINUTES = 1
 
 const ACCOUNT_STATUS_ERRORS = {
     '0': 'Your account is inactive. Please contact support to activate it.',

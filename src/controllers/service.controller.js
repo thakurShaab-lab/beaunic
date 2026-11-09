@@ -710,4 +710,4 @@ const getServiceDetails = async (req, res) => {
     }
 }
 
-module.exports = { addService, updateService, listServices, updateServiceStatus, getServiceDetails }
+module.exports = { addService, updateService, listServices, updateServiceStatus, getServiceDetails, buildSalonLocation, rupees }

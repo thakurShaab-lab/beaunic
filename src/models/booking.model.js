@@ -1,7 +1,10 @@
 const { eq, and, sql } = require("drizzle-orm")
+const { alias } = require("drizzle-orm/mysql-core")
 const db = require("../config/drizzle")
 const { wlBookingSlots } = require("../schema/wl-booking-slots")
 const { wlBookings } = require("../schema/wl-bookings")
+const { wlCustomers } = require("../schema/wl-customers")
+const { wlServices } = require("../schema/wl-services")
 
 // Books one place in a slot, or reports why it can't. One transaction with the slot row locked,
 // so two people can't both take the last place.
@@ -61,4 +64,32 @@ const bookSlot = async ({ slotId, salonId, customerId, checkSlot, buildBooking }
         return { booking: { ...booking, bookingId, invoiceNumber }, slot: { ...slot, bookedCount: slot.bookedCount + 1 } }
     })
 
-module.exports = { bookSlot }
+// The Salon Partner of a booking
+const salon = alias(wlCustomers, "salon")
+
+// One of the customer's own bookings, with the salon's name and type and the service's own type
+const findCustomerBooking = async (customerId, bookingId) => {
+    const rows = await db
+        .select({
+            booking: wlBookings,
+            salonName: salon.salonName,
+            salonType: salon.serviceType,
+            serviceType: wlServices.serviceType,
+        })
+        .from(wlBookings)
+        .leftJoin(salon, eq(salon.customerId, wlBookings.salonId))
+        .leftJoin(wlServices, eq(wlServices.serviceId, wlBookings.serviceId))
+        .where(and(eq(wlBookings.bookingId, bookingId), eq(wlBookings.customerId, customerId)))
+        .limit(1)
+
+    if (!rows[0]) return null
+    const { booking, ...extra } = rows[0]
+    return { ...booking, ...extra }
+}
+
+// Saves the coupon (or its removal) and the amount now payable on a booking
+const updateBookingCoupon = async (bookingId, values) => {
+    await db.update(wlBookings).set(values).where(eq(wlBookings.bookingId, bookingId))
+}
+
+module.exports = { bookSlot, findCustomerBooking, updateBookingCoupon }

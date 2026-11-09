@@ -203,6 +203,8 @@ const findActiveServiceWithSalon = async (serviceId) => {
             serviceName: wlServices.serviceName,
             serviceDescription: wlServices.serviceDescription,
             servicePrice: wlServices.servicePrice,
+            // The service's own type (wl_services.salon_type), when set
+            serviceType: wlServices.serviceType,
             salonName: salon.salonName,
             salonType: salon.serviceType,
             salonCustomerType: salon.customerType,
