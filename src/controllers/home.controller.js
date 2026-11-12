@@ -7,7 +7,7 @@ const addressModel = require('../models/address.model')
 const favoriteModel = require('../models/favorite.model')
 const { validateRequestDevice } = require('./device&app.controller')
 const { findLoggedInCustomer } = require('./profile.controller')
-const { withImageUrls, rupees, durationLabel } = require('./service.controller')
+const { withImageUrls, rupees, durationInfo } = require('./service.controller')
 const { resolveMediaUrl } = require('../utils/mediaUrl')
 const { convertNulls } = require('../utils/convertNulls')
 
@@ -40,10 +40,19 @@ const IMAGES = {
 // 2600 -> "2.6k"
 const shortCount = (value) => (value >= 1000 ? `${Number((value / 1000).toFixed(1))}k` : String(value))
 
-// "★ 4.8 (2.1k) · 45 min"; "★ 4.8 · 1 hr 10 min" when there's no count; just the duration when there's no rating
-const ratingLine = ({ averageRating, reviewCount, duration }) => {
+// The static cards give their duration in minutes: 45 -> "45 min", 70 -> "1 hr 10 min", 120 -> "2 hrs"
+const minutesLabel = (minutes) => {
+    if (!minutes) return null
+    const hours = Math.floor(minutes / 60)
+    const rest = minutes % 60
+    return [hours ? `${hours} ${hours === 1 ? 'hr' : 'hrs'}` : null, rest ? `${rest} min` : null].filter(Boolean).join(' ')
+}
+
+// "★ 4.8 (2.1k) · 1 Month"; "★ 4.8 · 1 hr 10 min" when there's no count; just the duration when there's no rating.
+// durationText: the duration as shown ("1 Month" from wl_durations, or a static card's minutes label)
+const ratingLine = ({ averageRating, reviewCount, durationText }) => {
     const rating = averageRating > 0 ? `★ ${averageRating}${reviewCount ? ` (${shortCount(reviewCount)})` : ''}` : null
-    return [rating, duration ? durationLabel(duration) : null].filter(Boolean).join(' · ') || null
+    return [rating, durationText].filter(Boolean).join(' · ') || null
 }
 
 // ----- Static sections (dummy data until these are built) -----
@@ -99,7 +108,6 @@ const formatAddress = (address) => {
 
 const formatHomeService = (row, imageUrl) => {
     const averageRating = Number(Number(row.averageRating).toFixed(1))
-    const duration = row.serviceDuration ?? null
     return {
         serviceId: row.serviceId,
         serviceName: row.serviceName,
@@ -108,9 +116,9 @@ const formatHomeService = (row, imageUrl) => {
         priceLabel: row.servicePrice !== null ? rupees(row.servicePrice) : 'Price not set',
         averageRating,
         reviewCount: row.reviewCount,
-        duration,
-        durationLabel: duration !== null ? durationLabel(duration) : null,
-        ratingLabel: ratingLine({ averageRating, reviewCount: row.reviewCount, duration }),
+        // From wl_durations: durationId, duration ("1 Month"), durationLabel
+        ...durationInfo(row),
+        ratingLabel: ratingLine({ averageRating, reviewCount: row.reviewCount, durationText: row.durationName }),
         serviceType: row.serviceType !== 'null' ? row.serviceType : null,
         serviceTypeLabel: SERVICE_TYPE_LABELS[row.serviceType] || null,
         salonId: row.salonId,
@@ -121,8 +129,8 @@ const formatHomeService = (row, imageUrl) => {
 const formatStaticService = (service) => ({
     ...service,
     priceLabel: rupees(service.price),
-    durationLabel: durationLabel(service.duration),
-    ratingLabel: ratingLine(service),
+    durationLabel: minutesLabel(service.duration),
+    ratingLabel: ratingLine({ ...service, durationText: minutesLabel(service.duration) }),
 })
 
 // ----- API -----

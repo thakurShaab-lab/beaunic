@@ -64,9 +64,16 @@ const wlBookings = mysqlTable("wl_bookings", {
 	paymentMode: mysqlEnum("payment_mode", ['online','cash']),
 	paymentReceivedDate: datetime("payment_received_date", { mode: 'string'}),
 	bookingUpdatedDate: datetime("booking_updated_date", { mode: 'string'}),
+	// Assigned employee (wl_employees), set by the Salon Partner
+	employeeId: int("employee_id"),
+	employeeAssignedDate: datetime("employee_assigned_date", { mode: 'string'}),
+	// Status timeline: the booking stays Upcoming (Booked) until the partner marks it Completed or Cancelled
+	bookingCompletedDate: datetime("booking_completed_date", { mode: 'string'}),
+	cancelledBy: mysqlEnum("cancelled_by", ['customer','salon']),                                // Who cancelled: the customer (request approved) or the salon
 },
 (table) => [
 	index("idx_bookings_customer_id").on(table.customerId),
+	index("idx_bookings_employee_id").on(table.employeeId),
 	index("idx_bookings_salon_id").on(table.salonId),
 	index("idx_bookings_slot_customer").on(table.slotId, table.customerId),
 	index("idx_bookings_salon_requests").on(table.salonId, table.cancelStatus, table.rescheduleStatus),

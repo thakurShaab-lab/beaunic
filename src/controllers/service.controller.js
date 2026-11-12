@@ -11,6 +11,7 @@ const membershipModel = require('../models/membership.model')
 const reviewModel = require('../models/review.model')
 const addressModel = require('../models/address.model')
 const favoriteModel = require('../models/favorite.model')
+const durationModel = require('../models/duration.model')
 const complaintModel = require('../models/complaint.model')
 const { validateRequestDevice } = require('./device&app.controller')
 const { detectImageExt } = require('./auth.controller')
@@ -19,6 +20,7 @@ const { noMarkup } = require('./address.controller')
 const { convertNulls } = require('../utils/convertNulls')
 const { formatDate } = require('../utils/formatDate')
 const { resolveMediaUrl } = require('../utils/mediaUrl')
+const { serviceShareUrl, requestUrl } = require('../utils/shareUrl')
 
 const SERVICE_IMAGE_FOLDER = 'services'
 // UPLOAD_DIR is the folder served at /uploaded_files, so images are saved straight under it
@@ -30,16 +32,23 @@ const MAX_IMAGES = 3
 // Blank form fields are ignored, so an edit clears a saved value by naming it here
 const REMOVABLE_FIELDS = ['price', 'description', 'duration']
 
-// Longest service: 24 hours, in minutes
-const MAX_DURATION_MINUTES = 1440
+// wl_services.service_duration holds a wl_durations.duration_id; durationName comes from the join with wl_durations.
+// notSet: the label when no duration is saved
+const durationInfo = (row, notSet = null) => ({
+    durationId: row.serviceDuration ?? null,
+    duration: row.durationName ?? null,
+    durationLabel: row.durationName || notSet,
+})
 
-// 45 -> "45 min", 60 -> "1 hr", 75 -> "1 hr 15 min", 120 -> "2 hrs"
-const durationLabel = (minutes) => {
-    if (minutes === null || minutes === undefined) return null
-    const hours = Math.floor(minutes / 60)
-    const rest = minutes % 60
-    return [hours ? `${hours} ${hours === 1 ? 'hr' : 'hrs'}` : null, rest ? `${rest} min` : null].filter(Boolean).join(' ')
-}
+// "duration_id" (or "durationId"): a wl_durations ID; blank / null clears it on update
+const durationIdField = z.coerce.number({ error: 'Duration ID must be a number' })
+    .int('Duration ID must be a number')
+    .positive('Duration ID must be a number')
+    .nullable()
+    .optional()
+
+// The duration ID sent in either spelling; undefined = not sent, null = clear it
+const sentDurationId = (d) => (d.duration_id !== undefined ? d.duration_id : d.durationId)
 
 // The app's toggle may send 1/0, true/false or active/inactive
 const STATUS_VALUES = { '1': '1', true: '1', active: '1', '0': '0', false: '0', inactive: '0' }
@@ -65,13 +74,9 @@ const optionalServiceFields = {
         .max(99999999.99, 'Price is too large')
         .nullable()
         .optional(),
-    // Minutes, e.g. 75 for "1 hr 15 min"; empty means "Duration not set"
-    duration: z.coerce.number({ error: 'Duration must be a number of minutes' })
-        .int('Duration must be a whole number of minutes')
-        .min(1, 'Duration must be at least 1 minute')
-        .max(MAX_DURATION_MINUTES, `Duration can be at most ${MAX_DURATION_MINUTES} minutes (24 hours)`)
-        .nullable()
-        .optional(),
+    // A duration from wl_durations ("1 Month", ...); empty means "Duration not set"
+    duration_id: durationIdField,
+    durationId: durationIdField,
     status: z.preprocess(
         toStatus,
         z.enum(['1', '0'], { error: 'Status must be 1 (Active) or 0 (Inactive)' }).optional()
@@ -102,7 +107,8 @@ const updateServiceSchema = z.object({
     ),
 }).strict().superRefine((d, ctx) => {
     for (const field of REMOVABLE_FIELDS) {
-        if (d.removeFields?.includes(field) && d[field] !== undefined && d[field] !== null) {
+        const sent = field === 'duration' ? sentDurationId(d) : d[field]
+        if (d.removeFields?.includes(field) && sent !== undefined && sent !== null) {
             ctx.addIssue({ code: 'custom', path: ['removeFields'], message: `Send ${field} or remove it, not both` })
         }
     }
@@ -245,9 +251,8 @@ const formatService = (service, media, category, membershipName) => {
         images,
         price: service.servicePrice,
         priceLabel: service.servicePrice !== null ? `₹${service.servicePrice}` : 'Price not set',
-        // Minutes, and the same as text ("1 hr 15 min")
-        duration: service.serviceDuration ?? null,
-        durationLabel: service.serviceDuration != null ? durationLabel(service.serviceDuration) : 'Duration not set',
+        // From wl_durations: durationId, duration ("1 Month") and durationLabel
+        ...durationInfo(service, 'Duration not set'),
         status: service.status,
         statusLabel: service.status === '1' ? 'Active' : 'Inactive',
     }
@@ -282,6 +287,13 @@ const addService = async (req, res) => {
             return res.status(200).json({ success: false, message: 'Category not found or not available.' })
         }
 
+        // The duration must be an active row of wl_durations
+        const durationId = sentDurationId(d)
+        const duration = durationId != null ? await durationModel.findActiveDuration(durationId) : null
+        if (durationId != null && !duration) {
+            return res.status(200).json({ success: false, message: 'Duration not found or not available.', field: 'duration_id' })
+        }
+
         await writeImages(images.all)
         written = true
 
@@ -293,7 +305,7 @@ const addService = async (req, res) => {
             serviceName: d.serviceName,
             serviceDescription: d.description ?? null,
             servicePrice: d.price != null ? d.price.toFixed(2) : null,
-            serviceDuration: d.duration ?? null,
+            serviceDuration: duration ? duration.durationId : null,
             status: d.status ?? '1',
             serviceAddedDate: now,
             serviceUpdatedDate: now,
@@ -308,7 +320,7 @@ const addService = async (req, res) => {
         return res.status(200).json({
             success: true,
             message: 'Service added successfully',
-            data: convertNulls(formatService({ ...service, serviceId }, await withImageUrls(req, media), category, membership.membershipName)),
+            data: convertNulls(formatService({ ...service, serviceId, durationName: duration ? duration.durationName : null }, await withImageUrls(req, media), category, membership.membershipName)),
         })
     } catch (err) {
         if (written) await deleteImageFiles(images.all.map((image) => image.name))
@@ -338,7 +350,7 @@ const updateService = async (req, res) => {
         categoryId: d.categoryId,
         serviceDescription: remove.has('description') ? null : d.description,
         servicePrice: remove.has('price') || d.price === null ? null : d.price?.toFixed(2),
-        serviceDuration: remove.has('duration') || d.duration === null ? null : d.duration,
+        serviceDuration: remove.has('duration') || sentDurationId(d) === null ? null : sentDurationId(d),
         status: d.status,
     }
 
@@ -360,6 +372,11 @@ const updateService = async (req, res) => {
         const category = await categoryModel.findActiveCategoryById(d.categoryId ?? existing.categoryId)
         if (d.categoryId !== undefined && !category) {
             return res.status(200).json({ success: false, message: 'Category not found or not available.' })
+        }
+
+        // A new duration must be an active row of wl_durations
+        if (values.serviceDuration != null && !(await durationModel.findActiveDuration(values.serviceDuration))) {
+            return res.status(200).json({ success: false, message: 'Duration not found or not available.', field: 'duration_id' })
         }
 
         const media = await serviceModel.findServiceMedia(existing.serviceId)
@@ -417,6 +434,8 @@ const updateService = async (req, res) => {
         }
 
         const savedMedia = await serviceModel.findServiceMedia(existing.serviceId)
+        const savedDuration = updated.serviceDuration != null ? await durationModel.findDuration(updated.serviceDuration) : null
+        updated.durationName = savedDuration ? savedDuration.durationName : null
 
         // Name the plan only while it is still the partner's active one
         const membership = await membershipModel.findActiveMembership(customer.customerId)
@@ -458,7 +477,7 @@ const listServices = async (req, res) => {
             return res.status(200).json({ success: false, message: 'Salon not found.' })
         }
 
-        const [services, membership, favoritesCount] = await Promise.all([
+        const [services, membership, favoritesCount, address] = await Promise.all([
             serviceModel.findCustomerServicesWithCategory(salonId, {
                 activeOnly: isUser,
                 serviceId,
@@ -474,13 +493,23 @@ const listServices = async (req, res) => {
             isUser ? null : membershipModel.findActiveMembership(customer.customerId),
             // The ♡ badge: how many services the logged-in customer saved (0 when none)
             favoriteModel.countCustomerFavorites(customer.customerId),
+            // The logged-in customer's saved city (default address), as in /category/list
+            addressModel.findDefaultAddress(customer.customerId),
         ])
+
+        // { city, state }, or null (sent as "") when the customer has no saved city: same as /category/list
+        const location = address?.city?.trim() ? { city: address.city.trim(), state: address.state } : null
 
         if (serviceId !== undefined && !services.length) {
             return res.status(200).json({ success: false, message: 'Service not found.' })
         }
 
-        const media = await withImageUrls(req, await serviceModel.findMediaForServices(services.map((service) => service.serviceId)))
+        const listedIds = services.map((service) => service.serviceId)
+        const [media, favoriteIds] = await Promise.all([
+            serviceModel.findMediaForServices(listedIds).then((rows) => withImageUrls(req, rows)),
+            // Which of these services the logged-in customer saved
+            favoriteModel.findFavoriteServiceIds(customer.customerId, listedIds),
+        ])
 
         const formatted = services.map((service) => ({
             ...formatService(
@@ -491,6 +520,10 @@ const listServices = async (req, res) => {
             ),
             averageRating: Number(Number(service.averageRating).toFixed(1)),
             reviewCount: service.reviewCount,
+            // 1 = in the logged-in customer's favorites, 0 = not
+            is_favorite: favoriteIds.has(service.serviceId) ? 1 : 0,
+            // The salon the service belongs to (both customer types)
+            salon_id: service.customerId,
             // A User's list can mix salons, so each service says whose it is (needed for /service/details)
             ...(isUser && { salonId: service.customerId, salonName: service.salonName }),
         }))
@@ -499,7 +532,7 @@ const listServices = async (req, res) => {
             return res.status(200).json({
                 success: true,
                 message: 'Service details fetched successfully',
-                data: convertNulls({ favoritesCount, service: formatted[0] }),
+                data: convertNulls({ location, favoritesCount, service: formatted[0] }),
             })
         }
 
@@ -511,6 +544,7 @@ const listServices = async (req, res) => {
                     : categoryId !== undefined ? 'No services found in this category'
                         : isUser ? 'No services found' : 'No services added yet',
             data: convertNulls({
+                location,
                 total: formatted.length,
                 favoritesCount,
                 // What was applied, so the sheets can show the selected chips
@@ -700,16 +734,19 @@ const getServiceDetails = async (req, res) => {
                 title: service.serviceName,
                 categoryName: service.categoryName,
                 // The ♡ next to the title
-                is_favorite: Boolean(favorite),
+                is_favorite: favorite ? 1 : 0,
+                // Share: one permanent link for every platform; it opens /share/service/{id}-{name}
+                share_url: serviceShareUrl(req, service),
+                // The address of this request itself (protocol + host + original URL, query string included)
+                share_link: requestUrl(req),
                 // 5. Ratings & reviews summary
                 ratingSummary,
                 // 6. Price & duration
                 pricing: {
                     price,
                     priceLabel: price !== null ? rupees(price) : 'Price not set',
-                    // wl_services has no duration yet
-                    duration: null,
-                    durationLabel: null,
+                    // From wl_durations (service_duration holds the duration ID)
+                    ...durationInfo(service),
                     serviceType: serviceType ? serviceType.label : null,
                 },
                 // 7. Description
@@ -741,4 +778,4 @@ const getServiceDetails = async (req, res) => {
     }
 }
 
-module.exports = { addService, updateService, listServices, updateServiceStatus, getServiceDetails, buildSalonLocation, rupees, withImageUrls, durationLabel }
+module.exports = { addService, updateService, listServices, updateServiceStatus, getServiceDetails, buildSalonLocation, rupees, withImageUrls, durationInfo }

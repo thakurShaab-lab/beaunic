@@ -5,6 +5,8 @@ const { wlBookingSlots } = require("../schema/wl-booking-slots")
 const { wlBookings } = require("../schema/wl-bookings")
 const { wlCustomers } = require("../schema/wl-customers")
 const { wlServices } = require("../schema/wl-services")
+const { wlDurations } = require("../schema/wl-durations")
+const { wlEmployees } = require("../schema/wl-employees")
 
 // Books one place in a slot, or reports why it can't. One transaction with the slot row locked,
 // so two people can't both take the last place.
@@ -67,8 +69,17 @@ const bookSlot = async ({ slotId, salonId, customerId, checkSlot, buildBooking }
 // The Salon Partner of a booking
 const salon = alias(wlCustomers, "salon")
 
-// One of the customer's own bookings, with the salon's name and type and the service's own type
-const findCustomerBooking = async (customerId, bookingId) => {
+// The assigned employee (whatever their status now, so a booking keeps showing who was assigned)
+const employeeColumns = {
+    employeeName: wlEmployees.employeeName,
+    employeeDesignation: wlEmployees.designation,
+    employeeImage: wlEmployees.employeeImage,
+}
+const employeeJoin = eq(wlEmployees.employeeId, wlBookings.employeeId)
+
+// One booking with the salon's name and type, the service's own type and duration, and the assigned employee.
+// owner: the condition that makes it the caller's own (the customer's or the salon's)
+const findBookingWithDetails = async (bookingId, owner) => {
     const rows = await db
         .select({
             booking: wlBookings,
@@ -76,17 +87,27 @@ const findCustomerBooking = async (customerId, bookingId) => {
             salonType: salon.serviceType,
             serviceType: wlServices.serviceType,
             serviceDuration: wlServices.serviceDuration,
+            durationName: wlDurations.durationName,
+            ...employeeColumns,
         })
         .from(wlBookings)
         .leftJoin(salon, eq(salon.customerId, wlBookings.salonId))
         .leftJoin(wlServices, eq(wlServices.serviceId, wlBookings.serviceId))
-        .where(and(eq(wlBookings.bookingId, bookingId), eq(wlBookings.customerId, customerId)))
+        .leftJoin(wlDurations, eq(wlDurations.durationId, wlServices.serviceDuration))
+        .leftJoin(wlEmployees, employeeJoin)
+        .where(and(eq(wlBookings.bookingId, bookingId), owner))
         .limit(1)
 
     if (!rows[0]) return null
     const { booking, ...extra } = rows[0]
     return { ...booking, ...extra }
 }
+
+// One of the customer's own bookings
+const findCustomerBooking = (customerId, bookingId) => findBookingWithDetails(bookingId, eq(wlBookings.customerId, customerId))
+
+// Partner: one of the salon's own bookings
+const findSalonBooking = (salonId, bookingId) => findBookingWithDetails(bookingId, eq(wlBookings.salonId, salonId))
 
 // Saves the coupon (or its removal) and the amount now payable on a booking
 const updateBookingCoupon = async (bookingId, values) => {
@@ -238,7 +259,7 @@ const respondToRequest = async ({ bookingId, salonId, requestType, action, note,
         if (booking.isCancel === "1" || booking.orderStatus !== "Booked") return { error: "booking_closed" }
 
         if (isCancel) {
-            const values = { ...decision, orderStatus: "Cancelled", isCancel: "1", bookingCancelledDate: now }
+            const values = { ...decision, orderStatus: "Cancelled", isCancel: "1", bookingCancelledDate: now, cancelledBy: "customer" }
             await tx.update(wlBookings).set(values).where(eq(wlBookings.bookingId, bookingId))
             await releaseSlotPlace(tx, booking.slotId)
             return { booking: { ...booking, ...values } }
@@ -289,6 +310,35 @@ const findSalonRequests = async (salonId, { requestType, status, limit }) => {
     return lists.flat().sort((a, b) => (a.requestedDate < b.requestedDate ? 1 : a.requestedDate > b.requestedDate ? -1 : 0)).slice(0, limit)
 }
 
+// Partner: one page of the salon's cancellation requests, latest request first.
+//   status: 'pending' | 'approved' | 'rejected' | undefined (all)
+const salonCancellations = (salonId, status) =>
+    and(eq(wlBookings.salonId, salonId), status ? eq(wlBookings.cancelStatus, status) : sql`${wlBookings.cancelStatus} <> 'none'`)
+
+const findSalonCancellationRequests = async (salonId, { status, limit, offset }) =>
+    db
+        .select()
+        .from(wlBookings)
+        .where(salonCancellations(salonId, status))
+        .orderBy(desc(wlBookings.cancelRequestedDate), desc(wlBookings.bookingId))
+        .limit(limit)
+        .offset(offset)
+
+// The salon's cancellation requests per status (the filter chips)
+const countSalonCancellationRequests = async (salonId) => {
+    const [row] = await db
+        .select({
+            pending: sql`COALESCE(SUM(${wlBookings.cancelStatus} = 'pending'), 0)`.mapWith(Number),
+            approved: sql`COALESCE(SUM(${wlBookings.cancelStatus} = 'approved'), 0)`.mapWith(Number),
+            rejected: sql`COALESCE(SUM(${wlBookings.cancelStatus} = 'rejected'), 0)`.mapWith(Number),
+            total: count(),
+        })
+        .from(wlBookings)
+        .where(salonCancellations(salonId))
+
+    return row
+}
+
 // Pending requests per kind, for the partner Home cards
 const countPendingRequests = async (salonId) => {
     const [row] = await db
@@ -321,20 +371,18 @@ const recordPayment = async ({ bookingId, salonId, paymentMode, paymentMethod, n
         return { booking: { ...booking, ...values } }
     })
 
-// The My Bookings tabs, worked out from the stored status and the slot's end time (salon time):
+// The booking status (the tabs), from the stored status only. A booking stays Upcoming until the Salon Partner
+// marks it Completed or Cancelled (or approves the customer's cancellation); the clock never moves it.
 //   cancelled: is_cancel 1 or status Cancelled
-//   completed: status Completed / No Show, or still Booked but the slot has ended
-//   upcoming:  Booked and the slot hasn't ended yet
+//   completed: status Completed / No Show
+//   upcoming:  status Booked
+// today / nowTime are no longer used; callers still pass them, so the signatures stay.
 const isCancelled = sql`(${wlBookings.isCancel} = '1' OR ${wlBookings.orderStatus} = 'Cancelled')`
-const slotEnded = (today, nowTime) =>
-    sql`(${wlBookings.slotDate} < ${today} OR (${wlBookings.slotDate} = ${today} AND ${wlBookings.endTime} <= ${nowTime}))`
 
 const BOOKING_TABS = {
     cancelled: () => isCancelled,
-    completed: (today, nowTime) =>
-        sql`(NOT ${isCancelled} AND (${wlBookings.orderStatus} IN ('Completed', 'No Show') OR (${wlBookings.orderStatus} = 'Booked' AND ${slotEnded(today, nowTime)})))`,
-    upcoming: (today, nowTime) =>
-        sql`(NOT ${isCancelled} AND ${wlBookings.orderStatus} = 'Booked' AND NOT ${slotEnded(today, nowTime)})`,
+    completed: () => sql`(NOT ${isCancelled} AND ${wlBookings.orderStatus} IN ('Completed', 'No Show'))`,
+    upcoming: () => sql`(NOT ${isCancelled} AND ${wlBookings.orderStatus} = 'Booked')`,
 }
 
 // Which tab a booking is in, as a column ('upcoming' | 'completed' | 'cancelled'; anything else 'other')
@@ -355,10 +403,12 @@ const findCustomerBookings = async (customerId, { tab, today, nowTime, limit, of
             salonType: salon.serviceType,
             serviceType: wlServices.serviceType,
             serviceDuration: wlServices.serviceDuration,
+            durationName: wlDurations.durationName,
         })
         .from(wlBookings)
         .leftJoin(salon, eq(salon.customerId, wlBookings.salonId))
         .leftJoin(wlServices, eq(wlServices.serviceId, wlBookings.serviceId))
+        .leftJoin(wlDurations, eq(wlDurations.durationId, wlServices.serviceDuration))
         .where(and(eq(wlBookings.customerId, customerId), tab ? BOOKING_TABS[tab](today, nowTime) : undefined))
         .orderBy(
             ...(tab === "upcoming"
@@ -411,8 +461,9 @@ const salonBookingsCondition = (salonId, { search, date, paymentStatus }) => {
 // One page of the salon's bookings for a tab (undefined = All). Upcoming shows the soonest first; the rest the latest first.
 const findSalonBookings = async (salonId, { tab, search, date, paymentStatus, today, nowTime, limit, offset }) =>
     db
-        .select({ booking: wlBookings, tab: bookingTab(today, nowTime).mapWith(String) })
+        .select({ booking: wlBookings, tab: bookingTab(today, nowTime).mapWith(String), ...employeeColumns })
         .from(wlBookings)
+        .leftJoin(wlEmployees, employeeJoin)
         .where(and(salonBookingsCondition(salonId, { search, date, paymentStatus }), tab ? BOOKING_TABS[tab](today, nowTime) : undefined))
         .orderBy(
             ...(tab === "upcoming"
@@ -439,7 +490,76 @@ const countSalonBookingsByTab = async (salonId, { search, date, paymentStatus, t
     return row
 }
 
+// ----- Salon Partner: status and employee -----
+
+// The salon's booking, locked for the rest of the transaction
+const lockSalonBooking = async (tx, salonId, bookingId) => {
+    const [booking] = await tx
+        .select()
+        .from(wlBookings)
+        .where(and(eq(wlBookings.bookingId, bookingId), eq(wlBookings.salonId, salonId)))
+        .limit(1)
+        .for("update")
+
+    return booking || null
+}
+
+// Partner: Upcoming -> Completed or Upcoming -> Cancelled. Completed and Cancelled are final.
+//   status: 'completed' | 'cancelled'
+// Cancelling frees the slot place. A request still waiting for the salon must be answered first.
+// Returns { error: 'not_found' | 'same_status' | 'final' | 'cancel_pending' | 'reschedule_pending' } or { booking }
+const updateBookingStatus = async ({ bookingId, salonId, status, now }) =>
+    db.transaction(async (tx) => {
+        const booking = await lockSalonBooking(tx, salonId, bookingId)
+        if (!booking) return { error: "not_found" }
+
+        const cancelled = booking.isCancel === "1" || booking.orderStatus === "Cancelled"
+        const completed = ["Completed", "No Show"].includes(booking.orderStatus)
+        if ((status === "cancelled" && cancelled) || (status === "completed" && completed)) return { error: "same_status" }
+        if (cancelled || completed || booking.orderStatus !== "Booked") return { error: "final" }
+
+        const pending = pendingRequestError(booking)
+        if (pending) return { error: pending }
+
+        const values = status === "completed"
+            ? { orderStatus: "Completed", bookingCompletedDate: now, bookingUpdatedDate: now }
+            : { orderStatus: "Cancelled", isCancel: "1", bookingCancelledDate: now, cancelledBy: "salon", bookingUpdatedDate: now }
+
+        await tx.update(wlBookings).set(values).where(eq(wlBookings.bookingId, bookingId))
+        if (status === "cancelled") await releaseSlotPlace(tx, booking.slotId)
+
+        return { booking: { ...booking, ...values } }
+    })
+
+// Partner: assigns (or re-assigns) one of the salon's active employees to an upcoming booking.
+// Returns { error: 'not_found' | 'employee_not_found' | 'closed' | 'same_employee' } or { booking, employee }
+const assignEmployee = async ({ bookingId, salonId, employeeId, now }) =>
+    db.transaction(async (tx) => {
+        const booking = await lockSalonBooking(tx, salonId, bookingId)
+        if (!booking) return { error: "not_found" }
+
+        const [employee] = await tx
+            .select()
+            .from(wlEmployees)
+            .where(and(eq(wlEmployees.employeeId, employeeId), eq(wlEmployees.salonId, salonId), eq(wlEmployees.status, "1")))
+            .limit(1)
+        if (!employee) return { error: "employee_not_found" }
+
+        if (booking.isCancel === "1" || booking.orderStatus !== "Booked") return { error: "closed" }
+        if (booking.employeeId === employeeId) return { error: "same_employee" }
+
+        const values = { employeeId, employeeAssignedDate: now, bookingUpdatedDate: now }
+        await tx.update(wlBookings).set(values).where(eq(wlBookings.bookingId, bookingId))
+
+        return { booking: { ...booking, ...values }, employee }
+    })
+
 module.exports = {
+    findSalonCancellationRequests,
+    countSalonCancellationRequests,
+    findSalonBooking,
+    updateBookingStatus,
+    assignEmployee,
     findSalonBookings,
     countSalonBookingsByTab,
     bookSlot,

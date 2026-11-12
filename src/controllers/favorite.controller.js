@@ -176,6 +176,8 @@ const listFavorites = async (req, res) => {
                         favoriteId: row.favoriteId,
                         favoriteAddedDate: row.favoriteAddedDate,
                         isFavorite: true,
+                        // 1 = in the logged-in customer's favorites, 0 = not (every row here is a saved favorite)
+                        is_favorite: row.favoriteId ? 1 : 0,
                         serviceId: row.serviceId,
                         serviceName: row.serviceName,
                         description: row.serviceDescription,

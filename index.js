@@ -29,6 +29,7 @@ const referralRoutes = require('./src/routes/referral.routes')
 const enquiryRoutes = require('./src/routes/enquiry.routes')
 const homeRoutes = require('./src/routes/home.routes')
 const employeeRoutes = require('./src/routes/employee.routes')
+const shareRoutes = require('./src/routes/share.routes')
 
 
 const app = express()
@@ -139,6 +140,9 @@ app.use('/api/referral', referralRoutes)
 app.use('/api/enquiry', enquiryRoutes)
 app.use('/api/home', homeRoutes)
 app.use('/api/employee', employeeRoutes)
+// Public share links: /share/service/:code (page with link previews) and /api/share/service/:code (JSON)
+app.use('/share', shareRoutes.pageRouter)
+app.use('/api/share', shareRoutes.apiRouter)
 
 
 const server = app.listen(env.port, '127.0.0.1', () => {

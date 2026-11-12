@@ -6,6 +6,7 @@ const { wlEnquiries } = require("../schema/wl-enquiries")
 const { wlReviews } = require("../schema/wl-reviews")
 const { wlServices } = require("../schema/wl-services")
 const { wlCustomers } = require("../schema/wl-customers")
+const { wlEmployees } = require("../schema/wl-employees")
 const { BOOKING_TABS, bookingTab } = require("./booking.model")
 
 const sumIf = (condition) => sql`COALESCE(SUM(${condition}), 0)`.mapWith(Number)
@@ -53,6 +54,9 @@ const bookingCard = (today, nowTime) => ({
     startTime: wlBookings.startTime,
     endTime: wlBookings.endTime,
     tab: bookingTab(today, nowTime).mapWith(String),
+    // The assigned employee (null when nobody is)
+    employeeName: wlEmployees.employeeName,
+    employeeDesignation: wlEmployees.designation,
 })
 
 // Today's bookings at the salon (not cancelled), earliest first
@@ -60,6 +64,7 @@ const findTodaySchedule = async (salonId, { today, nowTime, limit }) =>
     db
         .select(bookingCard(today, nowTime))
         .from(wlBookings)
+        .leftJoin(wlEmployees, eq(wlEmployees.employeeId, wlBookings.employeeId))
         .where(and(eq(wlBookings.salonId, salonId), eq(wlBookings.slotDate, today), sql`NOT ${isCancelled}`))
         .orderBy(asc(wlBookings.startTime), asc(wlBookings.bookingId))
         .limit(limit)
@@ -69,6 +74,7 @@ const findRecentBookings = async (salonId, { today, nowTime, limit }) =>
     db
         .select(bookingCard(today, nowTime))
         .from(wlBookings)
+        .leftJoin(wlEmployees, eq(wlEmployees.employeeId, wlBookings.employeeId))
         .where(eq(wlBookings.salonId, salonId))
         .orderBy(desc(wlBookings.orderReceivedDate), desc(wlBookings.bookingId))
         .limit(limit)

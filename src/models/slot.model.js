@@ -1,4 +1,4 @@
-const { eq, and, ne, gt, lt, gte, asc, count } = require("drizzle-orm")
+const { eq, and, ne, gt, lt, gte, asc, count, sql } = require("drizzle-orm")
 const db = require("../config/drizzle")
 const { wlBookingSlots } = require("../schema/wl-booking-slots")
 
@@ -20,8 +20,9 @@ const findCustomerSlot = async (customerId, slotId, { activeOnly = false } = {})
 }
 
 // A partner's slots by date, then start time.
-// Optional filters: slotDate (one day) and fromDate (that day onwards); unset ones are ignored.
-const findCustomerSlots = async (customerId, { slotDate, fromDate, activeOnly = false } = {}) =>
+// Optional filters: slotDate (one day), fromDate (that day onwards) and days (days of the month, e.g. [9, 12]);
+// unset ones are ignored.
+const findCustomerSlots = async (customerId, { slotDate, fromDate, days, activeOnly = false } = {}) =>
     db
         .select()
         .from(wlBookingSlots)
@@ -29,7 +30,8 @@ const findCustomerSlots = async (customerId, { slotDate, fromDate, activeOnly = 
             and(
                 salonSlots(customerId, activeOnly),
                 slotDate !== undefined ? eq(wlBookingSlots.slotDate, slotDate) : undefined,
-                fromDate !== undefined ? gte(wlBookingSlots.slotDate, fromDate) : undefined
+                fromDate !== undefined ? gte(wlBookingSlots.slotDate, fromDate) : undefined,
+                days?.length ? sql`DAYOFMONTH(${wlBookingSlots.slotDate}) IN (${sql.join(days.map((day) => sql`${day}`), sql`, `)})` : undefined
             )
         )
         .orderBy(asc(wlBookingSlots.slotDate), asc(wlBookingSlots.startTime))

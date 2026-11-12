@@ -1,4 +1,4 @@
-const { eq, and, desc, count } = require("drizzle-orm")
+const { eq, and, desc, count, inArray } = require("drizzle-orm")
 const { alias } = require("drizzle-orm/mysql-core")
 const db = require("../config/drizzle")
 const { wlFavoriteServices } = require("../schema/wl-favorite-services")
@@ -80,4 +80,16 @@ const countCustomerFavorites = async (customerId) => {
     return Number(rows[0].total)
 }
 
-module.exports = { findFavorite, addFavorite, removeFavorite, findCustomerFavorites, countCustomerFavorites }
+// Which of these services the customer saved, in one query: a Set of service IDs
+const findFavoriteServiceIds = async (customerId, serviceIds) => {
+    if (!serviceIds.length) return new Set()
+
+    const rows = await db
+        .select({ serviceId: wlFavoriteServices.serviceId })
+        .from(wlFavoriteServices)
+        .where(and(eq(wlFavoriteServices.customerId, customerId), inArray(wlFavoriteServices.serviceId, serviceIds)))
+
+    return new Set(rows.map((row) => row.serviceId))
+}
+
+module.exports = { findFavorite, addFavorite, removeFavorite, findCustomerFavorites, countCustomerFavorites, findFavoriteServiceIds }

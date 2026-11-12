@@ -3,6 +3,7 @@ const { sendValidationError } = require('../utils/validationError')
 const authModel = require('../models/auth.model')
 const addressModel = require('../models/address.model')
 const membershipModel = require('../models/membership.model')
+const geoModel = require('../models/geo.model')
 const { validateRequestDevice } = require('./device&app.controller')
 const { findSalonPartner } = require('./membership.controller')
 const { convertNulls } = require('../utils/convertNulls')
@@ -30,6 +31,12 @@ const optionalSupportNumber = z.preprocess(
     z.string().regex(/^\+?\d{8,15}$/, 'Enter a valid phone number').optional()
 )
 
+// An optional ID: blank / null / missing means "not sent"
+const optionalId = (message) => z.preprocess(
+    (value) => (typeof value === 'string' && !value.trim() ? undefined : value),
+    z.coerce.number({ error: message }).int(message).positive(message).optional()
+)
+
 const contactAndAddressFields = {
     contactNumber: optionalMobile,
     additionalContactNumbers: z.preprocess(
@@ -44,8 +51,9 @@ const contactAndAddressFields = {
     ),
     customerSupportNumber: optionalSupportNumber,
     address: optionalText(200),
-    country: optionalText(80),
-    state: optionalText(50),
+    // country: a wl_countries ID; state: a wl_cities ID, which must be a city of that country (see checkCountryAndCity)
+    country: optionalId('Country must be a country ID'),
+    state: optionalId('State must be a city ID'),
     location: optionalText(50),
     pinCode: z.preprocess(
         (value) => typeof value === 'string' && !value.trim() ? undefined : value,
@@ -70,8 +78,32 @@ const toAddressColumns = (d) => ({
     city: d.location,
     state: d.state,
     zipcode: d.pinCode,
-    country: d.country,
+    // Saved as text in the address book's varchar columns
+    country: d.country !== undefined ? String(d.country) : undefined,
+    state: d.state !== undefined ? String(d.state) : undefined,
 })
+
+// A country / city ID saved in the address book, or null when it holds older free text (e.g. "India")
+const savedId = (value) => (/^\d+$/.test(String(value ?? '').trim()) ? Number(value) : null)
+
+// country (country ID) and state (city ID): the country must be active, and the city must be an active city
+// whose country_id is that country. Returns { error, field } or { country, city }.
+const checkCountryAndCity = async (countryId, cityId) => {
+    if (cityId != null && countryId == null) return { error: 'Please select a country first.', field: 'country' }
+
+    const [country, city] = await Promise.all([
+        countryId != null ? geoModel.findActiveCountry(countryId) : null,
+        cityId != null ? geoModel.findActiveCity(cityId) : null,
+    ])
+
+    if (countryId != null && !country) return { error: 'Country not found.', field: 'country' }
+    if (cityId != null && !city) return { error: 'City not found.', field: 'state' }
+    if (city && city.countryId !== country.countryId) {
+        return { error: 'The selected city does not belong to the selected country.', field: 'state' }
+    }
+
+    return { country, city }
+}
 
 const formatOrderAddress = ({ address, location, pinCode, country }) =>
     [address, [location, pinCode].filter(Boolean).join(' - '), country].filter(Boolean).join(', ')
@@ -106,6 +138,9 @@ const addAddress = async (req, res) => {
             })
         }
 
+        const place = await checkCountryAndCity(d.country, d.state)
+        if (place.error) return res.status(200).json({ success: false, message: place.error, field: place.field })
+
         const isFirstAddress = !(await authModel.hasAddress(customer.customerId))
         const additionalNumbers = d.additionalContactNumbers?.length ? d.additionalContactNumbers : null
 
@@ -118,11 +153,11 @@ const addAddress = async (req, res) => {
             recivDate: authModel.nowString(),
         })
 
-        const orderAddress = formatOrderAddress(d)
-        if (orderAddress || d.state) {
+        const orderAddress = formatOrderAddress({ ...d, country: place.country?.countryName })
+        if (orderAddress || place.city) {
             await membershipModel.updateOrderAddress(order.orderId, {
                 ...(orderAddress && { address: orderAddress }),
-                ...(d.state && { state: d.state }),
+                ...(place.city && { state: place.city.cityName }),
             })
         }
 
@@ -138,7 +173,9 @@ const addAddress = async (req, res) => {
                 customerSupportNumber: d.customerSupportNumber ?? null,
                 address: d.address ?? null,
                 country: d.country ?? null,
+                countryName: place.country?.countryName ?? null,
                 state: d.state ?? null,
+                stateName: place.city?.cityName ?? null,
                 location: d.location ?? null,
                 pinCode: d.pinCode ?? null,
                 isDefault: isFirstAddress,
@@ -158,4 +195,6 @@ module.exports = {
     formatOrderAddress,
     optionalText,
     noMarkup,
+    checkCountryAndCity,
+    savedId,
 }

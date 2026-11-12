@@ -5,6 +5,9 @@ module.exports = {
   port: parseInt(process.env.PORT, 10) || 3000,
   apiBasePath: process.env.API_BASE_PATH || '/api',
   staticFileBaseUrl: process.env.STATIC_FILE_BASE_URL || '',
+  // Public address of this server used in shared service links (e.g. https://node.weblink4you.com/beaunic_node).
+  // Empty: the address the request came in on. Keep it fixed once links are shared, so they stay valid.
+  shareBaseUrl: process.env.SHARE_BASE_URL || '',
 
   db: {
     host: process.env.DB_HOST,

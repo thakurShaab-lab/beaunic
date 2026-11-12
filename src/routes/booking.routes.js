@@ -1,16 +1,5 @@
 const express = require('express')
-const {
-    createBooking,
-    getBookingSummary,
-    cancelBooking,
-    rescheduleBooking,
-    listBookings,
-    getBookingDetails,
-    listBookingRequests,
-    respondBookingRequest,
-    recordBookingPayment,
-    listSalonBookings,
-} = require('../controllers/booking.controller')
+const { createBooking, getBookingSummary, cancelBooking, rescheduleBooking, listBookings, getBookingDetails, listBookingRequests, respondBookingRequest, recordBookingPayment, listSalonBookings, getSalonBookingDetails, updateSalonBookingStatus, listCancellationRequests } = require('../controllers/booking.controller')
 const { jwtAuthMiddleware, deviceAuthMiddleware } = require('../middleware/auth.middleware')
 const { parsePayload } = require('../middleware/payload.middleware')
 
@@ -29,5 +18,9 @@ router.post('/requests', jwtAuthMiddleware, parsePayload(), deviceAuthMiddleware
 router.post('/request/respond', jwtAuthMiddleware, parsePayload(), deviceAuthMiddleware, respondBookingRequest)
 router.post('/payment', jwtAuthMiddleware, parsePayload(), deviceAuthMiddleware, recordBookingPayment)
 router.post('/partner/list', jwtAuthMiddleware, parsePayload(), deviceAuthMiddleware, listSalonBookings)
+router.post('/partner/details', jwtAuthMiddleware, parsePayload(), deviceAuthMiddleware, getSalonBookingDetails)
+router.post('/partner/status', jwtAuthMiddleware, parsePayload(), deviceAuthMiddleware, updateSalonBookingStatus)
+// 'Cancellation Requests': the customers' cancellation requests for the partner's own salon
+router.post('/partner/cancellation-requests', jwtAuthMiddleware, parsePayload(), deviceAuthMiddleware, listCancellationRequests)
 
 module.exports = router

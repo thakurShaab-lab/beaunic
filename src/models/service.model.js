@@ -2,6 +2,7 @@ const { eq, and, ne, inArray, asc, desc, sql, gte, lt, lte, like, isNotNull } = 
 const { alias } = require("drizzle-orm/mysql-core")
 const db = require("../config/drizzle")
 const { wlServices } = require("../schema/wl-services")
+const { wlDurations } = require("../schema/wl-durations")
 const { wlReviews } = require("../schema/wl-reviews")
 
 // "50%_off" -> "50\%\_off", so LIKE matches the text literally
@@ -87,6 +88,7 @@ const findCustomerServicesWithCategory = async (
             serviceDescription: wlServices.serviceDescription,
             servicePrice: wlServices.servicePrice,
             serviceDuration: wlServices.serviceDuration,
+            durationName: wlDurations.durationName,
             status: wlServices.status,
             serviceAddedDate: wlServices.serviceAddedDate,
             serviceUpdatedDate: wlServices.serviceUpdatedDate,
@@ -97,6 +99,8 @@ const findCustomerServicesWithCategory = async (
         .leftJoin(wlCategories, eq(wlCategories.categoryId, wlServices.categoryId))
         .leftJoin(serviceRatings, eq(serviceRatings.serviceId, wlServices.serviceId))
         .leftJoin(salon, eq(salon.customerId, wlServices.customerId))
+        // service_duration holds a wl_durations.duration_id
+        .leftJoin(wlDurations, eq(wlDurations.durationId, wlServices.serviceDuration))
         .where(
             and(
                 customerId !== undefined ? eq(wlServices.customerId, customerId) : undefined,
@@ -204,6 +208,8 @@ const findActiveServiceWithSalon = async (serviceId) => {
             serviceName: wlServices.serviceName,
             serviceDescription: wlServices.serviceDescription,
             servicePrice: wlServices.servicePrice,
+            serviceDuration: wlServices.serviceDuration,
+            durationName: wlDurations.durationName,
             // The service's own type (wl_services.salon_type), when set
             serviceType: wlServices.serviceType,
             salonName: salon.salonName,
@@ -215,6 +221,7 @@ const findActiveServiceWithSalon = async (serviceId) => {
         .leftJoin(wlCategories, eq(wlCategories.categoryId, wlServices.categoryId))
         .leftJoin(parentCategory, eq(parentCategory.categoryId, wlCategories.parentId))
         .leftJoin(salon, eq(salon.customerId, wlServices.customerId))
+        .leftJoin(wlDurations, eq(wlDurations.durationId, wlServices.serviceDuration))
         .where(and(eq(wlServices.serviceId, serviceId), eq(wlServices.status, "1")))
         .limit(1)
 

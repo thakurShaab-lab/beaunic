@@ -4,6 +4,7 @@ const db = require("../config/drizzle")
 const { wlHeaderImages } = require("../schema/wl-header-images")
 const { wlCategories } = require("../schema/wl-categories")
 const { wlServices } = require("../schema/wl-services")
+const { wlDurations } = require("../schema/wl-durations")
 const { wlCustomers } = require("../schema/wl-customers")
 const { serviceRatings, averageRating, reviewCount } = require("./service.model")
 
@@ -57,6 +58,7 @@ const findHomeServices = async (section, limit) =>
             serviceName: wlServices.serviceName,
             servicePrice: wlServices.servicePrice,
             serviceDuration: wlServices.serviceDuration,
+            durationName: wlDurations.durationName,
             serviceType: effectiveType.mapWith(String),
             categoryId: wlServices.categoryId,
             salonId: salon.customerId,
@@ -67,6 +69,7 @@ const findHomeServices = async (section, limit) =>
         .from(wlServices)
         .innerJoin(salon, eq(salon.customerId, wlServices.customerId))
         .leftJoin(serviceRatings, eq(serviceRatings.serviceId, wlServices.serviceId))
+        .leftJoin(wlDurations, eq(wlDurations.durationId, wlServices.serviceDuration))
         .where(
             and(
                 eq(wlServices.status, "1"),

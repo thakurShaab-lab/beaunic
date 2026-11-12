@@ -169,9 +169,9 @@ const getPartnerHome = async (req, res) => {
                         endTimeLabel: `to ${timeLabel(row.endTime)}`,
                         customerName: fullName(row),
                         serviceName: row.serviceName,
-                        // No employees are stored yet
-                        employeeName: null,
-                        employeeLabel: 'Employee not assigned',
+                        employeeName: row.employeeName || null,
+                        // "Rohit Kumar · Hair Stylist", or "Employee not assigned"
+                        employeeLabel: row.employeeName ? [row.employeeName, row.employeeDesignation].filter(Boolean).join(' · ') : 'Employee not assigned',
                         status: row.tab,
                         statusLabel: STATUS_LABELS[row.tab] || null,
                     })),

@@ -9,7 +9,9 @@ const { validateRequestDevice } = require('./device&app.controller')
 const { findLoggedInCustomer } = require('./profile.controller')
 const { noMarkup } = require('./address.controller')
 const { salonNow, timeLabel, dateParts, hhmm, formatSlot } = require('./slot.controller')
-const { buildSalonLocation, rupees, withImageUrls, durationLabel } = require('./service.controller')
+const { buildSalonLocation, rupees, withImageUrls, durationInfo } = require('./service.controller')
+const { photoUrl: employeePhotoUrl, initialsOf } = require('./employee.controller')
+const employeeModel = require('../models/employee.model')
 const { convertNulls } = require('../utils/convertNulls')
 
 const SLOT_NOT_AVAILABLE = 'Selected slot is not available.'
@@ -427,12 +429,12 @@ const getBookingSummary = async (req, res) => {
                 service: {
                     serviceId: booking.serviceId,
                     serviceName: booking.serviceName,
-                    // No duration is stored for services yet
-                    duration: null,
+                    // The service's duration from wl_durations: durationId, duration ("1 Month"), durationLabel
+                    ...durationInfo(booking),
                     serviceType: typeKey,
                     serviceTypeLabel: typeLabel,
-                    // "1 hr 15 min · At Salon" once a duration exists
-                    subtitle: typeLabel,
+                    // "1 Month · At Salon"
+                    subtitle: [booking.durationName, typeLabel].filter(Boolean).join(' · ') || null,
                 },
                 schedule: {
                     slotId: booking.slotId,
@@ -735,7 +737,6 @@ const paymentLabel = (booking) =>
 const bookingBasics = (booking, tab) => {
     const typeKey = booking.serviceType || booking.salonType
     const typeLabel = SERVICE_TYPE_LABELS[typeKey] || null
-    const duration = booking.serviceDuration ?? null
     const pendingRequest = pendingRequestOf(booking)
     // Reschedule / Cancel buttons: upcoming, not started, and no request already waiting for the salon
     const changeable = tab === 'upcoming' && !hasStarted(booking) && !pendingRequest
@@ -764,9 +765,8 @@ const bookingBasics = (booking, tab) => {
         startTime: hhmm(booking.startTime),
         endTime: hhmm(booking.endTime),
         timeLabel: timeLabel(booking.startTime),
-        // Minutes from the service (bookings don't store one); null when the service has none
-        duration,
-        durationLabel: duration !== null ? durationLabel(duration) : null,
+        // The service's duration from wl_durations (bookings don't store one); null when the service has none
+        ...durationInfo(booking),
         amount: Number(booking.totalAmount),
         amountLabel: rupees(booking.totalAmount),
         paymentStatus: booking.paymentStatus,
@@ -777,14 +777,35 @@ const bookingBasics = (booking, tab) => {
     }
 }
 
-// Which tab a single booking belongs to (the same rules as the list's SQL)
+// Which tab a single booking belongs to (the same rules as the list's SQL). Only a stored status moves a
+// booking out of Upcoming: the partner marks it Completed / Cancelled, or approves the customer's cancellation.
 const tabOf = (booking) => {
     if (booking.isCancel === '1' || booking.orderStatus === 'Cancelled') return 'cancelled'
     if (['Completed', 'No Show'].includes(booking.orderStatus)) return 'completed'
-    if (booking.orderStatus !== 'Booked') return 'other'
-    const now = salonNow()
-    const ended = booking.slotDate < now.date || (booking.slotDate === now.date && hhmm(booking.endTime) <= now.time)
-    return ended ? 'completed' : 'upcoming'
+    if (booking.orderStatus === 'Booked') return 'upcoming'
+    return 'other'
+}
+
+// The assigned employee, from the booking's employee join; null when nobody is assigned
+const assignedEmployeeOf = (booking, imageUrl = null) =>
+    booking.employeeId && booking.employeeName
+        ? {
+            employeeId: booking.employeeId,
+            employeeName: booking.employeeName,
+            designation: booking.employeeDesignation,
+            // "Rohit Kumar · Hair Stylist"
+            label: [booking.employeeName, booking.employeeDesignation].filter(Boolean).join(' · '),
+            initials: initialsOf(booking.employeeName),
+            imageUrl,
+            assignedDate: booking.employeeAssignedDate,
+        }
+        : null
+
+// "Approved by the salon · 07 Oct 2026 · 12:00 AM" / "Cancelled by the salon · …"
+const cancelledSubtitle = (booking) => {
+    const when = booking.bookingCancelledDate ? salonDateTimeLabel(booking.bookingCancelledDate) : null
+    const who = booking.cancelledBy === 'salon' ? 'Cancelled by the salon' : 'Approved by the salon'
+    return when ? `${who} · ${when}` : 'Cancelled'
 }
 
 // The Status card on Booking Details
@@ -821,7 +842,7 @@ const buildTimeline = (booking, tab) => {
             {
                 key: 'cancelled',
                 title: 'Booking cancelled',
-                subtitle: booking.bookingCancelledDate ? `Approved by the salon · ${salonDateTimeLabel(booking.bookingCancelledDate)}` : 'Cancelled',
+                subtitle: cancelledSubtitle(booking),
                 isDone: true,
                 date: booking.bookingCancelledDate,
             },
@@ -839,9 +860,11 @@ const buildTimeline = (booking, tab) => {
     const serviceCompleted = {
         key: 'completed',
         title: 'Service completed',
-        subtitle: completed ? (booking.orderStatus === 'No Show' ? 'No show' : 'Completed') : 'Pending',
+        subtitle: completed
+            ? [booking.orderStatus === 'No Show' ? 'No show' : 'Completed', booking.bookingCompletedDate && salonDateTimeLabel(booking.bookingCompletedDate)].filter(Boolean).join(' · ')
+            : 'Pending',
         isDone: completed,
-        date: null,
+        date: booking.bookingCompletedDate || null,
     }
 
     // Waiting for the salon: Booking placed → Booking confirmed → Cancellation requested → Service completed (Pending)
@@ -1033,6 +1056,124 @@ const listBookingRequests = async (req, res) => {
     }
 }
 
+// ----- Salon Partner: "Cancellation Requests" screen -----
+
+const CANCEL_REQUEST_STATUS = ['pending', 'approved', 'rejected']
+
+// Every field is optional: status "all" or blank = every request; page 1 of 10 by default
+const cancellationRequestsSchema = z.object({
+    ...deviceFields,
+    status: z.preprocess(
+        (value) => (typeof value === 'string' ? (value.trim().toLowerCase() === 'all' ? undefined : value.trim().toLowerCase()) : value),
+        z.enum(CANCEL_REQUEST_STATUS, { error: 'Status must be one of: all, pending, approved, rejected' }).optional()
+    ),
+    page: z.coerce.number({ error: 'Page must be a number' }).int('Page must be a whole number').min(1, 'Page must be 1 or more').optional(),
+    limit: z.coerce.number({ error: 'Limit must be a number' })
+        .int('Limit must be a whole number')
+        .min(1, 'Limit must be 1 or more')
+        .max(MAX_PAGE_SIZE, `Limit can be at most ${MAX_PAGE_SIZE}`)
+        .optional(),
+}).strict()
+
+// One card: "BK-24028 · Pending", customer and service, Booking Date, the reason and "Requested on 06 Oct 2026"
+const formatCancellationCard = (row) => {
+    const request = cancellationOf(row)
+    const customerName = [row.firstName, row.lastName].filter(Boolean).join(' ').trim() || null
+    const reasonLabel = CANCEL_REASONS[row.cancelReason] || null
+    const requestedDay = row.cancelRequestedDate ? salonDateTimeLabel(row.cancelRequestedDate).split(' · ')[0] : null
+
+    return {
+        bookingId: row.bookingId,
+        bookingNumber: bookingNumber(row.bookingId),
+        // The badge: Pending / Approved / Rejected
+        status: row.cancelStatus,
+        statusLabel: REQUEST_STATUS_LABELS[row.cancelStatus],
+        customer: {
+            customerId: row.customerId,
+            name: customerName,
+            initials: nameInitials(customerName),
+            mobileNumber: row.mobileNumber,
+            email: row.email,
+        },
+        customerName,
+        serviceId: row.serviceId,
+        serviceName: row.serviceName,
+        // "Booking Date 07 Oct 2026" and the slot
+        bookingDate: row.slotDate,
+        bookingDateLabel: shortDate(row.slotDate),
+        startTime: hhmm(row.startTime),
+        endTime: hhmm(row.endTime),
+        timeSlotLabel: `${timeLabel(row.startTime)} – ${timeLabel(row.endTime)}`,
+        // The quoted line: what the customer wrote, else the reason they picked
+        reason: row.cancelReasonNote || reasonLabel,
+        cancelReason: row.cancelReason,
+        cancelReasonLabel: reasonLabel,
+        cancelReasonNote: row.cancelReasonNote,
+        requestedDate: row.cancelRequestedDate,
+        requestedDateLabel: requestedDay ? `Requested on ${requestedDay}` : null,
+        // "06 Oct 2026 · 09:30 AM"
+        requestedDateTimeLabel: request.requestedDateLabel,
+        respondedDate: row.cancelRespondedDate,
+        respondedDateLabel: request.respondedDateLabel,
+        responseNote: row.cancelResponseNote,
+        amount: Number(row.totalAmount),
+        amountLabel: rupees(row.totalAmount),
+        paymentStatus: row.paymentStatus,
+        refund: request.refund,
+        canApprove: row.cancelStatus === 'pending',
+        canReject: row.cancelStatus === 'pending',
+    }
+}
+
+// "Cancellation Requests" (Salon Partner): the customers' cancellation requests for the logged-in partner's salon only
+const listCancellationRequests = async (req, res) => {
+    if (!(await validateRequestDevice(req, res))) return
+
+    const parsed = cancellationRequestsSchema.safeParse(req.body)
+
+    if (!parsed.success) return sendValidationError(res, parsed.error)
+
+    const { status } = parsed.data
+    const page = parsed.data.page ?? 1
+    const limit = parsed.data.limit ?? DEFAULT_PAGE_SIZE
+
+    try {
+        const partner = await findSalonPartner(req, res, parsed.data)
+        if (!partner) return
+
+        // The salon is the logged-in partner (from the token), never an ID from the request
+        const salonId = partner.customerId
+        const [counts, rows] = await Promise.all([
+            bookingModel.countSalonCancellationRequests(salonId),
+            bookingModel.findSalonCancellationRequests(salonId, { status, limit, offset: (page - 1) * limit }),
+        ])
+
+        const total = status ? counts[status] : counts.total
+        const totalPages = Math.ceil(total / limit)
+
+        return res.status(200).json({
+            success: true,
+            message: rows.length
+                ? 'Cancellation requests fetched successfully'
+                : total ? 'No more cancellation requests'
+                    : status ? `No ${status} cancellation requests` : 'No cancellation requests yet',
+            data: convertNulls({
+                // Filter chips: "All 3 · Pending 1 · Approved 1 · Rejected 1"
+                filters: [
+                    { key: 'all', label: 'All', count: counts.total, isSelected: !status },
+                    ...CANCEL_REQUEST_STATUS.map((key) => ({ key, label: REQUEST_STATUS_LABELS[key], count: counts[key], isSelected: key === status })),
+                ],
+                selectedStatus: status ?? 'all',
+                requests: rows.map(formatCancellationCard),
+                pagination: { page, limit, total, totalPages, hasNextPage: page < totalPages },
+            }),
+        })
+    } catch (err) {
+        console.error('List cancellation requests error:', err)
+        return res.status(200).json({ success: false, message: 'Something went wrong' })
+    }
+}
+
 // Approve / reject a customer's cancellation or reschedule request
 const respondBookingRequest = async (req, res) => {
     if (!(await validateRequestDevice(req, res))) return
@@ -1205,11 +1346,13 @@ const getBookingDetails = async (req, res) => {
         if (!booking) return res.status(200).json({ success: false, message: 'Booking not found.' })
 
         const tab = tabOf(booking)
-        const [address, covers] = await Promise.all([
+        const [address, covers, employeeImageUrl] = await Promise.all([
             addressModel.findDefaultAddress(booking.salonId),
             coverImages(req, [booking.serviceId]),
+            booking.employeeId ? employeePhotoUrl(req, booking.employeeImage) : null,
         ])
         const basics = bookingBasics(booking, tab)
+        const employee = assignedEmployeeOf(booking, employeeImageUrl)
         const location = buildSalonLocation(booking.salonId, booking.salonName, address)
         const pricePaise = toPaise(booking.servicePrice)
         const discountPaise = toPaise(booking.couponDiscountAmount || 0)
@@ -1227,8 +1370,8 @@ const getBookingDetails = async (req, res) => {
                 details: {
                     bookingId: basics.bookingNumber,
                     salon: booking.salonName,
-                    // No employees/artists are stored yet
-                    employee: null,
+                    // "Rohit Kumar · Hair Stylist" once the salon assigns someone
+                    employee: employee ? employee.label : null,
                     dateAndSlot: `${basics.bookingDateLabel} · ${basics.timeLabel}`,
                     payment: paymentLabel(booking),
                     amount: basics.amountLabel,
@@ -1247,8 +1390,8 @@ const getBookingDetails = async (req, res) => {
                     // "Beaunic Salon Academy, Main Market, Dildarnagar, Uttar Pradesh 232326"
                     fullAddressWithName: [booking.salonName, location.fullAddress].filter(Boolean).join(', ') || null,
                 },
-                // No employees/artists (or their ratings) are stored yet
-                employee: null,
+                // The employee the salon assigned; null until then
+                employee,
                 customer: {
                     customerId: booking.customerId,
                     name: [booking.firstName, booking.lastName].filter(Boolean).join(' ').trim() || null,
@@ -1326,9 +1469,10 @@ const formatSalonBooking = (row) => {
         endTime: hhmm(row.endTime),
         // "10:00 AM – 11:00 AM"
         timeSlotLabel: `${timeLabel(row.startTime)} – ${timeLabel(row.endTime)}`,
-        // No employees are stored yet
-        employeeName: null,
-        employeeLabel: 'Not assigned',
+        employeeId: row.employeeName ? row.employeeId : null,
+        employeeName: row.employeeName || null,
+        // "Rohit Kumar · Hair Stylist", or "Not assigned"
+        employeeLabel: row.employeeName ? [row.employeeName, row.employeeDesignation].filter(Boolean).join(' · ') : 'Not assigned',
         amount: Number(row.totalAmount),
         amountLabel: rupees(row.totalAmount),
         paymentStatus: row.paymentStatus,
@@ -1336,8 +1480,8 @@ const formatSalonBooking = (row) => {
         // "Paid · Online" (green dot) / "Unpaid · Cash at salon" (red dot)
         paymentLabel: paid ? `Paid · ${row.paymentMethod || PAYMENT_MODE_LABELS[mode] || 'Online'}` : 'Unpaid · Cash at salon',
         isPaid: paid,
-        // "Update Status": only while the booking is active
-        canUpdateStatus: row.tab === 'upcoming',
+        // "Update Status": only while the booking is upcoming and no customer request is waiting
+        canUpdateStatus: row.tab === 'upcoming' && !pendingRequest,
     }
 }
 
@@ -1403,7 +1547,350 @@ const listSalonBookings = async (req, res) => {
     }
 }
 
+// ----- Salon Partner: Booking Details and Update Status -----
+
+const partnerBookingSchema = z.object({
+    ...deviceFields,
+    bookingId: bookingIdField,
+}).strict()
+
+// The statuses on the "Update Status" sheet, in order
+const STATUS_OPTIONS = ['upcoming', 'completed', 'cancelled']
+
+const updateStatusSchema = z.object({
+    ...deviceFields,
+    bookingId: bookingIdField,
+    // "Completed", "completed", "Cancelled", "canceled", ...
+    status: z.preprocess(
+        (value) => (typeof value === 'string' ? ({ canceled: 'cancelled', complete: 'completed' }[value.trim().toLowerCase()] ?? value.trim().toLowerCase()) : value),
+        z.enum(STATUS_OPTIONS, { error: 'Status must be one of: upcoming, completed, cancelled' })
+    ),
+}).strict()
+
+const STATUS_ERRORS = {
+    not_found: 'Booking not found.',
+    final: 'This booking is already completed or cancelled, so its status can no longer be changed.',
+    cancel_pending: 'This booking has a pending cancellation request. Approve or reject it first.',
+    reschedule_pending: 'This booking has a pending reschedule request. Approve or reject it first.',
+}
+
+// Upcoming -> Completed / Cancelled; Completed and Cancelled are final
+const ALLOWED_NEXT = { upcoming: ['completed', 'cancelled'], completed: [], cancelled: [] }
+
+// The "Update Status" sheet: every status, with the current one marked and the ones it can move to
+const statusOptionsFor = (tab) =>
+    STATUS_OPTIONS.map((key) => ({
+        key,
+        label: TAB_LABELS[key],
+        isCurrent: key === tab,
+        isAllowed: (ALLOWED_NEXT[tab] || []).includes(key),
+    }))
+
+// "9415022871" -> "+91 94150 22871"; anything else as saved
+const phoneLabel = (mobile) => {
+    const digits = String(mobile || '').replace(/\D/g, '').replace(/^91(?=\d{10}$)/, '')
+    return digits.length === 10 ? `+91 ${digits.slice(0, 5)} ${digits.slice(5)}` : mobile || null
+}
+
+// The partner's Status Timeline: Booking placed → Slot reserved → Payment → (request) → Service completed / cancelled.
+// Each step has its timestamp (date) when it has happened.
+const buildPartnerTimeline = (booking, tab) => {
+    const paid = booking.paymentStatus === 'Paid'
+    const steps = [
+        {
+            key: 'placed',
+            title: 'Booking placed',
+            subtitle: booking.orderReceivedDate ? shortDate(booking.orderReceivedDate) : null,
+            isDone: true,
+            date: booking.orderReceivedDate,
+            dateLabel: booking.orderReceivedDate ? salonDateTimeLabel(booking.orderReceivedDate) : null,
+        },
+        {
+            key: 'slot_reserved',
+            title: 'Slot reserved',
+            subtitle: `${timeLabel(booking.startTime)} – ${timeLabel(booking.endTime)}`,
+            isDone: true,
+            date: booking.orderReceivedDate,
+            dateLabel: booking.orderReceivedDate ? salonDateTimeLabel(booking.orderReceivedDate) : null,
+        },
+        {
+            key: 'payment',
+            title: paid ? 'Payment received' : 'Payment pending',
+            // "Unpaid · Cash at salon" / "Paid · UPI"
+            subtitle: paid ? paymentLabel(booking) : 'Unpaid · Cash at salon',
+            isDone: paid,
+            date: paid ? booking.paymentReceivedDate : null,
+            dateLabel: paid && booking.paymentReceivedDate ? salonDateTimeLabel(booking.paymentReceivedDate) : null,
+        },
+    ]
+
+    if (booking.employeeId && booking.employeeName) {
+        steps.push({
+            key: 'employee_assigned',
+            title: 'Employee assigned',
+            subtitle: [booking.employeeName, booking.employeeDesignation].filter(Boolean).join(' · '),
+            isDone: true,
+            date: booking.employeeAssignedDate,
+            dateLabel: booking.employeeAssignedDate ? salonDateTimeLabel(booking.employeeAssignedDate) : null,
+        })
+    }
+
+    // A request the customer made, while it waits or once it's answered
+    if (booking.cancelRequestedDate && booking.cancelStatus !== 'none') {
+        steps.push({
+            key: 'cancellation_requested',
+            title: 'Cancellation requested',
+            subtitle: booking.cancelStatus === 'pending' ? 'Waiting for your response' : REQUEST_STATUS_LABELS[booking.cancelStatus],
+            isDone: booking.cancelStatus !== 'pending',
+            isCurrent: booking.cancelStatus === 'pending',
+            date: booking.cancelRequestedDate,
+            dateLabel: salonDateTimeLabel(booking.cancelRequestedDate),
+        })
+    }
+    if (booking.rescheduleRequestedDate && booking.rescheduleStatus !== 'none') {
+        steps.push({
+            key: 'reschedule_requested',
+            title: 'Reschedule requested',
+            subtitle: booking.rescheduleStatus === 'pending'
+                ? (booking.requestedSlotDate ? `To ${shortDate(booking.requestedSlotDate)} · ${timeLabel(booking.requestedStartTime)}` : 'Waiting for your response')
+                : REQUEST_STATUS_LABELS[booking.rescheduleStatus],
+            isDone: booking.rescheduleStatus !== 'pending',
+            isCurrent: booking.rescheduleStatus === 'pending',
+            date: booking.rescheduleRequestedDate,
+            dateLabel: salonDateTimeLabel(booking.rescheduleRequestedDate),
+        })
+    }
+
+    if (tab === 'cancelled') {
+        steps.push({
+            key: 'cancelled',
+            title: 'Booking cancelled',
+            subtitle: booking.cancelledBy === 'salon' ? 'Cancelled by you' : 'Cancelled at the customer\'s request',
+            isDone: true,
+            date: booking.bookingCancelledDate,
+            dateLabel: booking.bookingCancelledDate ? salonDateTimeLabel(booking.bookingCancelledDate) : null,
+        })
+    } else {
+        const completed = tab === 'completed'
+        steps.push({
+            key: 'completed',
+            title: 'Service completed',
+            subtitle: completed ? (booking.orderStatus === 'No Show' ? 'No show' : 'Completed') : 'Awaiting service',
+            isDone: completed,
+            date: completed ? booking.bookingCompletedDate : null,
+            dateLabel: completed && booking.bookingCompletedDate ? salonDateTimeLabel(booking.bookingCompletedDate) : null,
+        })
+    }
+
+    // Steps with a time are in the order they happened; the last step always closes the list
+    const last = steps.pop()
+    const first = steps.slice(0, 3)
+    const events = steps.slice(3).sort((a, b) => String(a.date || '').localeCompare(String(b.date || '')))
+    return [...first, ...events, last]
+}
+
+// "Booking Details" (Salon Partner): one of the salon's own bookings, everything the screen shows
+const getSalonBookingDetails = async (req, res) => {
+    if (!(await validateRequestDevice(req, res))) return
+
+    const parsed = partnerBookingSchema.safeParse(req.body)
+
+    if (!parsed.success) return sendValidationError(res, parsed.error)
+
+    try {
+        const partner = await findSalonPartner(req, res, parsed.data)
+        if (!partner) return
+
+        // Looked up by booking ID and the logged-in partner's salon, so other salons' bookings are "not found"
+        const booking = await bookingModel.findSalonBooking(partner.customerId, parsed.data.bookingId)
+        if (!booking) return res.status(200).json({ success: false, message: 'Booking not found.' })
+
+        const tab = tabOf(booking)
+        const isUpcoming = tab === 'upcoming'
+        const [covers, employeeImageUrl, activeEmployees] = await Promise.all([
+            coverImages(req, [booking.serviceId]),
+            booking.employeeId ? employeePhotoUrl(req, booking.employeeImage) : null,
+            // The "Assigned Employee" dropdown (only while the booking is upcoming)
+            isUpcoming ? employeeModel.findActiveSalonEmployees(partner.customerId) : [],
+        ])
+
+        const basics = bookingBasics(booking, tab)
+        const employee = assignedEmployeeOf(booking, employeeImageUrl)
+        const customerName = [booking.firstName, booking.lastName].filter(Boolean).join(' ').trim() || null
+        const timeSlotLabel = `${timeLabel(booking.startTime)} – ${timeLabel(booking.endTime)}`
+        const paid = booking.paymentStatus === 'Paid'
+        const pendingRequest = pendingRequestOf(booking)
+        const cancellation = cancellationOf(booking)
+        const reschedule = rescheduleOf(booking)
+
+        return res.status(200).json({
+            success: true,
+            message: 'Booking details fetched successfully',
+            data: convertNulls({
+                bookingId: booking.bookingId,
+                // "BK-24030"
+                bookingNumber: basics.bookingNumber,
+                invoiceNumber: booking.invoiceNumber,
+                // The badge: Upcoming / Completed / Cancelled
+                status: tab,
+                statusLabel: TAB_LABELS[tab] || booking.orderStatus,
+                orderStatus: booking.orderStatus,
+                isCancel: booking.isCancel,
+                cancelledBy: booking.cancelledBy,
+                // Header: "Haircut & Styling" / "07 Oct 2026 · 11:30 AM – 12:30 PM"
+                title: booking.serviceName,
+                headerSubtitle: `${basics.bookingDateLabel} · ${timeSlotLabel}`,
+                timeline: buildPartnerTimeline(booking, tab),
+                // "Customer Information"
+                customer: {
+                    customerId: booking.customerId,
+                    name: customerName,
+                    initials: nameInitials(customerName),
+                    mobileNumber: booking.mobileNumber,
+                    mobileNumberLabel: phoneLabel(booking.mobileNumber),
+                    email: booking.email,
+                },
+                // "Service & Schedule"
+                service: {
+                    serviceId: booking.serviceId,
+                    serviceName: booking.serviceName,
+                    serviceType: basics.serviceType,
+                    serviceTypeLabel: basics.serviceTypeLabel,
+                    imageUrl: covers.get(booking.serviceId) || null,
+                    durationId: basics.durationId,
+                    duration: basics.duration,
+                    durationLabel: basics.durationLabel,
+                },
+                schedule: {
+                    slotId: booking.slotId,
+                    bookingDate: booking.slotDate,
+                    bookingDateLabel: basics.bookingDateLabel,
+                    startTime: basics.startTime,
+                    endTime: basics.endTime,
+                    timeSlotLabel,
+                },
+                // "Assigned Employee": who's assigned (null when nobody) and the dropdown
+                assignedEmployee: employee,
+                employeeLabel: employee ? employee.label : 'Not assigned',
+                canAssignEmployee: isUpcoming,
+                employeeOptions: activeEmployees.map((row) => ({
+                    employeeId: row.employeeId,
+                    employeeName: row.employeeName,
+                    designation: row.designation,
+                    label: `${row.employeeName} · ${row.designation}`,
+                    isSelected: row.employeeId === booking.employeeId,
+                })),
+                // "Payment"
+                payment: {
+                    paymentStatus: booking.paymentStatus,
+                    isPaid: paid,
+                    // The badge: Paid / Unpaid
+                    badge: booking.paymentStatus,
+                    paymentMode: paymentModeOf(booking),
+                    paymentMethod: booking.paymentMethod,
+                    // "Unpaid · Cash at salon" / "Paid · UPI"
+                    label: paid ? paymentLabel(booking) : 'Unpaid · Cash at salon',
+                    servicePrice: Number(booking.servicePrice),
+                    discount: Number(booking.couponDiscountAmount || 0),
+                    couponCode: booking.discountCouponCode || null,
+                    amount: basics.amount,
+                    amountLabel: basics.amountLabel,
+                    paymentReceivedDate: booking.paymentReceivedDate,
+                    paymentReceivedDateLabel: booking.paymentReceivedDate ? salonDateTimeLabel(booking.paymentReceivedDate) : null,
+                    canRecordPayment: !paid && tab !== 'cancelled',
+                },
+                // The banner at the bottom while a request waits: "Reschedule request pending · Manage Reschedule Request"
+                pendingRequest,
+                requestBanner: pendingRequest
+                    ? pendingRequest.type === 'cancel'
+                        ? { type: 'cancel', title: 'Cancellation request pending', actionLabel: 'Manage Cancellation Request' }
+                        : { type: 'reschedule', title: 'Reschedule request pending', actionLabel: 'Manage Reschedule Request' }
+                    : null,
+                cancellation,
+                reschedule,
+                // "Update Status": Upcoming -> Completed / Cancelled, only while upcoming and no request is waiting
+                canUpdateStatus: isUpcoming && !pendingRequest,
+                statusOptions: statusOptionsFor(tab),
+                notes: booking.bookingNotes,
+                bookedOn: booking.orderReceivedDate,
+                bookedOnLabel: booking.orderReceivedDate ? salonDateTimeLabel(booking.orderReceivedDate) : null,
+                completedDate: booking.bookingCompletedDate,
+                cancelledDate: booking.bookingCancelledDate,
+            }),
+        })
+    } catch (err) {
+        console.error('Salon booking details error:', err)
+        return res.status(200).json({ success: false, message: 'Something went wrong' })
+    }
+}
+
+// "Update Status" (Salon Partner): Upcoming -> Completed or Cancelled. A booking stays Upcoming until this is used.
+const updateSalonBookingStatus = async (req, res) => {
+    if (!(await validateRequestDevice(req, res))) return
+
+    const parsed = updateStatusSchema.safeParse(req.body)
+
+    if (!parsed.success) return sendValidationError(res, parsed.error)
+
+    const { bookingId, status } = parsed.data
+
+    try {
+        const partner = await findSalonPartner(req, res, parsed.data)
+        if (!partner) return
+
+        const existing = await bookingModel.findSalonBooking(partner.customerId, bookingId)
+        if (!existing) return res.status(200).json({ success: false, message: 'Booking not found.' })
+
+        const current = tabOf(existing)
+        if (status === current) {
+            return res.status(200).json({ success: false, message: `This booking is already ${TAB_LABELS[status]}.` })
+        }
+        if (status === 'upcoming') return res.status(200).json({ success: false, message: STATUS_ERRORS.final })
+
+        const result = await bookingModel.updateBookingStatus({
+            bookingId,
+            salonId: partner.customerId,
+            status,
+            now: authModel.nowString(),
+        })
+        if (result.error) {
+            if (result.error === 'same_status') return res.status(200).json({ success: false, message: `This booking is already ${TAB_LABELS[status]}.` })
+            return res.status(200).json({ success: false, message: STATUS_ERRORS[result.error] })
+        }
+
+        // The saved booking with the joined names, for the timeline
+        const booking = { ...existing, ...result.booking }
+        const tab = tabOf(booking)
+
+        return res.status(200).json({
+            success: true,
+            message: `Booking marked as ${TAB_LABELS[tab]}`,
+            data: convertNulls({
+                bookingId: booking.bookingId,
+                bookingNumber: bookingNumber(booking.bookingId),
+                previousStatus: current,
+                status: tab,
+                statusLabel: TAB_LABELS[tab],
+                orderStatus: booking.orderStatus,
+                isCancel: booking.isCancel,
+                cancelledBy: booking.cancelledBy,
+                statusUpdatedDate: booking.bookingUpdatedDate,
+                statusUpdatedDateLabel: salonDateTimeLabel(booking.bookingUpdatedDate),
+                canUpdateStatus: false,
+                statusOptions: statusOptionsFor(tab),
+                timeline: buildPartnerTimeline(booking, tab),
+            }),
+        })
+    } catch (err) {
+        console.error('Update booking status error:', err)
+        return res.status(200).json({ success: false, message: 'Something went wrong' })
+    }
+}
+
 module.exports = {
+    listCancellationRequests,
+    getSalonBookingDetails,
+    updateSalonBookingStatus,
     createBooking,
     getBookingSummary,
     cancelBooking,
