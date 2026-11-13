@@ -34,10 +34,16 @@ const wlEnquiries = mysqlTable("wl_enquiries", {
 	// The Salon Partner deleted it from their list (/api/enquiry/partner/delete); the admin panel still has it
 	salonDeleted: mysqlEnum("salon_deleted", ['0','1']).default('0').notNull(),
 	salonDeletedDate: datetime("salon_deleted_date", { mode: 'string'}),
+	// Sent to the partner by the admin (/api/enquiry/admin/send): tbl_admin.admin_id (0 = sent by the customer),
+	// the enquiry it was forwarded from (0 = written by the admin) and when
+	forwardedBy: int("forwarded_by").default(0).notNull(),
+	forwardedFrom: int("forwarded_from").default(0).notNull(),
+	forwardedDate: datetime("forwarded_date", { mode: 'string'}),
 },
 (table) => [
 	primaryKey({ columns: [table.id], name: "wl_enquiries_id"}),
 	index("idx_enquiries_salon").on(table.inquiryType, table.entityId),
+	index("idx_enquiries_forwarded").on(table.forwardedFrom, table.entityId),
 ]);
 
 module.exports = { wlEnquiries };

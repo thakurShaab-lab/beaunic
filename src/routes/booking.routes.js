@@ -1,5 +1,5 @@
 const express = require('express')
-const { createBooking, getBookingSummary, getPaymentMethods, payForBooking, cancelBooking, rescheduleBooking, listBookings, getBookingDetails, listBookingRequests, respondBookingRequest, recordBookingPayment, listSalonBookings, getSalonBookingDetails, updateSalonBookingStatus, listCancellationRequests } = require('../controllers/booking.controller')
+const { createBooking, getBookingSummary, getPaymentMethods, payForBooking, getBookingSuccess, cancelBooking, rescheduleBooking, listBookings, getBookingDetails, listBookingRequests, respondBookingRequest, recordBookingPayment, listSalonBookings, getSalonBookingDetails, updateSalonBookingStatus, listCancellationRequests } = require('../controllers/booking.controller')
 const { jwtAuthMiddleware, deviceAuthMiddleware } = require('../middleware/auth.middleware')
 const { parsePayload } = require('../middleware/payload.middleware')
 
@@ -10,6 +10,8 @@ router.post('/summary', jwtAuthMiddleware, parsePayload(), deviceAuthMiddleware,
 // Step 4 'Payment Method': wallet balance, payment options and the amount; then 'PAY NOW'
 router.post('/payment-methods', jwtAuthMiddleware, parsePayload(), deviceAuthMiddleware, getPaymentMethods)
 router.post('/pay', jwtAuthMiddleware, parsePayload(), deviceAuthMiddleware, payForBooking)
+// 'Booking Successful' screen after payment
+router.post('/success', jwtAuthMiddleware, parsePayload(), deviceAuthMiddleware, getBookingSuccess)
 router.post('/cancel', jwtAuthMiddleware, parsePayload(), deviceAuthMiddleware, cancelBooking)
 router.post('/reschedule', jwtAuthMiddleware, parsePayload(), deviceAuthMiddleware, rescheduleBooking)
 router.post('/create', jwtAuthMiddleware, parsePayload(), deviceAuthMiddleware, createBooking)

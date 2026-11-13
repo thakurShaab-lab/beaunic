@@ -762,6 +762,78 @@ const payForBooking = async (req, res) => {
     }
 }
 
+// "Booking Successful" screen, shown after /booking/pay: the User's own paid booking
+const bookingSuccessSchema = z.object({
+    ...deviceFields,
+    bookingId: bookingIdField,
+}).strict()
+
+const getBookingSuccess = async (req, res) => {
+    if (!(await validateRequestDevice(req, res))) return
+
+    const parsed = bookingSuccessSchema.safeParse(req.body)
+
+    if (!parsed.success) return sendValidationError(res, parsed.error)
+
+    try {
+        const customer = await findUser(req, res, parsed.data)
+        if (!customer) return
+
+        const booking = await bookingModel.findCustomerBooking(customer.customerId, parsed.data.bookingId)
+        if (!booking) return res.status(200).json({ success: false, message: 'Booking not found.' })
+
+        if (booking.isCancel === '1' || booking.orderStatus === 'Cancelled') {
+            return res.status(200).json({ success: false, message: 'This booking is cancelled.' })
+        }
+        // The success screen only follows a completed payment
+        if (booking.paymentStatus !== 'Paid') {
+            return res.status(200).json({ success: false, message: 'Payment for this booking is not complete yet.' })
+        }
+
+        const amountPaid = Number(booking.totalAmount)
+        const typeKey = booking.serviceType || booking.salonType
+
+        return res.status(200).json({
+            success: true,
+            message: 'Booking successful',
+            data: convertNulls({
+                title: 'Booking Successful',
+                subtitle: 'A confirmation has been sent to your phone.',
+                bookingId: booking.bookingId,
+                // The badge under the subtitle: "BK-30418"
+                bookingNumber: bookingNumber(booking.bookingId),
+                bookingStatus: booking.orderStatus,
+                // The details card, row by row
+                serviceId: booking.serviceId,
+                serviceName: booking.serviceName,
+                serviceType: typeKey,
+                serviceTypeLabel: SERVICE_TYPE_LABELS[typeKey] || null,
+                date: booking.slotDate,
+                dateLabel: shortDate(booking.slotDate),
+                startTime: hhmm(booking.startTime),
+                endTime: hhmm(booking.endTime),
+                timeLabel: timeLabel(booking.startTime),
+                timeRangeLabel: `${timeLabel(booking.startTime)} – ${timeLabel(booking.endTime)}`,
+                salonId: booking.salonId,
+                salonName: booking.salonName,
+                amountPaid,
+                amountPaidLabel: rupees(amountPaid),
+                // How it was paid
+                paymentStatus: booking.paymentStatus,
+                paymentMethod: booking.paymentMethod,
+                transactionId: booking.paymentTransactionId,
+                paidOn: booking.paymentReceivedDate,
+                paidOnLabel: booking.paymentReceivedDate ? salonDateTimeLabel(booking.paymentReceivedDate) : null,
+                couponCode: booking.discountCouponCode,
+                discount: Number(booking.couponDiscountAmount || 0),
+            }),
+        })
+    } catch (err) {
+        console.error('Booking success error:', err)
+        return res.status(200).json({ success: false, message: 'Something went wrong' })
+    }
+}
+
 // Only a "Booked" booking whose time hasn't come yet can be cancelled or moved.
 // action: 'cancel' | 'reschedule', for the "already started" message
 const bookingChangeError = (booking, action) => {
@@ -2163,6 +2235,7 @@ const updateSalonBookingStatus = async (req, res) => {
 }
 
 module.exports = {
+    getBookingSuccess,
     getPaymentMethods,
     payForBooking,
     listCancellationRequests,
