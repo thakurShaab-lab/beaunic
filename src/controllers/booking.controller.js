@@ -4,6 +4,7 @@ const authModel = require('../models/auth.model')
 const serviceModel = require('../models/service.model')
 const bookingModel = require('../models/booking.model')
 const couponModel = require('../models/coupon.model')
+const walletModel = require('../models/wallet.model')
 const addressModel = require('../models/address.model')
 const { validateRequestDevice } = require('./device&app.controller')
 const { findLoggedInCustomer } = require('./profile.controller')
@@ -350,6 +351,32 @@ const createBooking = async (req, res) => {
     }
 }
 
+// What a booking costs: its saved service price, less the coupon (if any). The single place the payable amount is
+// worked out, for the Booking Summary, the Payment Method screen and /booking/pay, so they always agree.
+// couponCode: undefined = no coupon. Returns { error } or { coupon, pricePaise, discountPaise, totalPaise }.
+const priceBooking = async (booking, customerId, couponCode) => {
+    const pricePaise = toPaise(booking.servicePrice)
+    if (couponCode === undefined || couponCode === null || couponCode === '') {
+        return { coupon: null, pricePaise, discountPaise: 0, totalPaise: pricePaise }
+    }
+    const result = await applyCoupon(couponCode, customerId, pricePaise, booking.bookingId)
+    if (result.error) return { error: result.error }
+    return { coupon: result.coupon, pricePaise, discountPaise: result.discountPaise, totalPaise: pricePaise - result.discountPaise }
+}
+
+// The "Price Details" card, row by row
+const priceDetailsOf = ({ coupon, pricePaise, discountPaise, totalPaise }) => ({
+    servicePrice: fromPaise(pricePaise),
+    servicePriceLabel: rupees(fromPaise(pricePaise)),
+    discount: fromPaise(discountPaise),
+    discountLabel: discountPaise > 0 ? `− ${rupees(fromPaise(discountPaise))}` : rupees(0),
+    couponLabel: coupon ? `Applied (${coupon.couponCode})` : 'Not applied',
+    taxesAndCharges: null,
+    taxesAndChargesLabel: 'As applicable',
+    totalPayable: fromPaise(totalPaise),
+    totalPayableLabel: rupees(fromPaise(totalPaise)),
+})
+
 // "Booking Summary" (step 3 of 4): a booking from wl_bookings — its service, slot, salon and price — with an
 // optional coupon. The coupon (or no coupon) and the amount payable are saved on the booking for the payment step.
 const getBookingSummary = async (req, res) => {
@@ -379,31 +406,34 @@ const getBookingSummary = async (req, res) => {
         }
 
         const salonId = booking.salonId
-        // The price saved when the booking was made
-        const pricePaise = toPaise(booking.servicePrice)
-        let coupon = null
-        let discountPaise = 0
-
-        // Only checked when a code is sent; a bad code is an error, never a silent "no discount"
-        if (d.couponCode !== undefined) {
-            const result = await applyCoupon(d.couponCode, customer.customerId, pricePaise, booking.bookingId)
-            if (result.error) {
-                return res.status(200).json({ success: false, message: result.error, field: 'couponCode' })
-            }
-            coupon = result.coupon
-            discountPaise = result.discountPaise
+        // The price saved when the booking was made, less the coupon. Only checked when a code is sent; a bad code
+        // is an error, never a silent "no discount"
+        const price = await priceBooking(booking, customer.customerId, d.couponCode)
+        if (price.error) {
+            return res.status(200).json({ success: false, message: price.error, field: 'couponCode' })
         }
+        const { coupon } = price
 
-        const totalPaise = pricePaise - discountPaise
-
-        // The booking keeps the coupon shown here (or none) and what is payable now
-        await bookingModel.updateBookingCoupon(booking.bookingId, {
-            discountCouponId: coupon ? coupon.couponId : 0,
-            discountCouponCode: coupon ? coupon.couponCode : null,
-            couponDiscountAmount: coupon ? fromPaise(discountPaise) : null,
-            totalAmount: fromPaise(totalPaise).toFixed(2),
+        // wl_bookings always holds the latest coupon status: the coupon applied now, or (no couponCode sent) none at
+        // all, so a coupon applied earlier and then removed is cleared from the booking
+        const saved = await bookingModel.updateBookingCoupon(booking.bookingId, customer.customerId, {
+            ...couponColumns(price),
+            totalAmount: fromPaise(price.totalPaise).toFixed(2),
             bookingUpdatedDate: authModel.nowString(),
         })
+        if (!saved) {
+            return res.status(200).json({ success: false, message: 'This booking can no longer be changed. Please refresh and try again.' })
+        }
+
+        // The price shown is the one now saved on the booking
+        const savedBooking = await bookingModel.findCustomerBooking(customer.customerId, booking.bookingId)
+        const savedPrice = {
+            coupon,
+            pricePaise: toPaise(savedBooking.servicePrice),
+            discountPaise: toPaise(savedBooking.couponDiscountAmount || 0),
+            totalPaise: toPaise(savedBooking.totalAmount),
+        }
+        const { discountPaise, totalPaise } = savedPrice
 
         const address = await addressModel.findDefaultAddress(salonId)
         const location = buildSalonLocation(salonId, booking.salonName, address)
@@ -465,17 +495,7 @@ const getBookingSummary = async (req, res) => {
                     }
                     : { applied: false, couponCode: null, discountAmount: 0, label: 'Not applied' },
                 // The "Price Details" card, row by row
-                priceDetails: {
-                    servicePrice: fromPaise(pricePaise),
-                    servicePriceLabel: rupees(fromPaise(pricePaise)),
-                    discount: fromPaise(discountPaise),
-                    discountLabel: discountPaise > 0 ? `− ${rupees(fromPaise(discountPaise))}` : rupees(0),
-                    couponLabel: coupon ? `Applied (${coupon.couponCode})` : 'Not applied',
-                    taxesAndCharges: null,
-                    taxesAndChargesLabel: 'As applicable',
-                    totalPayable: fromPaise(totalPaise),
-                    totalPayableLabel: rupees(fromPaise(totalPaise)),
-                },
+                priceDetails: priceDetailsOf(savedPrice),
                 totalPayable: fromPaise(totalPaise),
                 totalPayableLabel: rupees(fromPaise(totalPaise)),
                 note: SUMMARY_NOTE,
@@ -483,6 +503,261 @@ const getBookingSummary = async (req, res) => {
         })
     } catch (err) {
         console.error('Booking summary error:', err)
+        return res.status(200).json({ success: false, message: 'Something went wrong' })
+    }
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// "Payment Method" (step 4 of 4) and paying for a booking. The amount always comes from the booking in wl_bookings
+// (service price less the coupon saved by /booking/summary), worked out by priceBooking; the app never sends it.
+
+// The options on the Payment Method screen, in screen order
+const PAYMENT_METHODS = {
+    upi: { title: 'UPI', subtitle: 'Google Pay, PhonePe, Paytm or any UPI app', icon: 'upi' },
+    card: { title: 'Credit / Debit Card', subtitle: 'Visa, Mastercard, RuPay', icon: 'card' },
+    netbanking: { title: 'Net Banking', subtitle: 'All major Indian banks', icon: 'bank' },
+    wallet: { title: 'Beaunic Wallet', subtitle: null, icon: 'wallet' },
+    other: { title: 'Other Methods', subtitle: 'Pay Later and other options via payment gateway', icon: 'globe' },
+}
+
+// The UPI app logos under UPI
+const UPI_APPS = {
+    gpay: 'Google Pay',
+    phonepe: 'PhonePe',
+    paytm: 'Paytm',
+    bhim: 'BHIM',
+}
+
+const DEFAULT_PAYMENT_METHOD = 'upi'
+const SECURE_NOTE = 'Payments are secured and encrypted'
+
+const lowerText = (value) => (typeof value === 'string' ? value.trim().toLowerCase() : value)
+
+const paymentMethodsSchema = z.object({
+    ...deviceFields,
+    bookingId: bookingIdField,
+}).strict()
+
+const payBookingSchema = z.object({
+    ...deviceFields,
+    bookingId: bookingIdField,
+    paymentMethod: z.preprocess(
+        lowerText,
+        z.enum(Object.keys(PAYMENT_METHODS), { error: 'Payment method must be upi, card, netbanking, wallet or other' })
+    ),
+    // Optional, UPI only: which app was used
+    upiApp: z.preprocess(
+        lowerText,
+        z.enum(Object.keys(UPI_APPS), { error: 'UPI app must be gpay, phonepe, paytm or bhim' }).optional()
+    ),
+    // The payment gateway's transaction / payment ID; not used for the Beaunic Wallet
+    transactionId: z.string({ error: 'Transaction ID must be text' })
+        .trim()
+        .min(4, 'Invalid transaction ID')
+        .max(100, 'Invalid transaction ID')
+        .regex(/^[A-Za-z0-9_\-.:/]+$/, 'Invalid transaction ID')
+        .optional(),
+}).strict().superRefine((d, ctx) => {
+    if (d.upiApp !== undefined && d.paymentMethod !== 'upi') {
+        ctx.addIssue({ code: 'custom', path: ['upiApp'], message: 'UPI app is only for UPI payments' })
+    }
+    if (d.paymentMethod === 'wallet' && d.transactionId !== undefined) {
+        ctx.addIssue({ code: 'custom', path: ['transactionId'], message: 'Transaction ID is not needed for Beaunic Wallet payments' })
+    }
+})
+
+const PAY_ERRORS = {
+    not_found: 'Booking not found.',
+    cancelled: 'This booking is cancelled.',
+    closed: 'This booking can no longer be paid for.',
+    already_paid: 'This booking has already been paid.',
+    price_changed: 'The price of this booking has changed. Please check the booking summary and try again.',
+    transaction_used: 'This transaction has already been used for another booking.',
+}
+
+// "UPI · Google Pay", "Credit / Debit Card", ... as saved in wl_bookings.payment_method
+const paymentMethodLabel = (method, upiApp) =>
+    [PAYMENT_METHODS[method].title, upiApp ? UPI_APPS[upiApp] : null].filter(Boolean).join(' · ')
+
+// Same balance as the Beaunic Wallet screen: cashback + credits - debits
+const walletBalanceFor = async (customerId) => {
+    const summary = await walletModel.findWalletSummary(customerId)
+    return (toPaise(summary.cashback) + toPaise(summary.credits) - toPaise(summary.debits)) / 100
+}
+
+// The User's own booking that can still be paid for, priced. Replies and returns null otherwise.
+const findPayableBooking = async (res, customerId, bookingId) => {
+    const booking = await bookingModel.findCustomerBooking(customerId, bookingId)
+    if (!booking) {
+        res.status(200).json({ success: false, message: PAY_ERRORS.not_found })
+        return null
+    }
+    if (booking.isCancel === '1' || booking.orderStatus === 'Cancelled') {
+        res.status(200).json({ success: false, message: PAY_ERRORS.cancelled })
+        return null
+    }
+    if (booking.orderStatus !== 'Booked') {
+        res.status(200).json({ success: false, message: PAY_ERRORS.closed })
+        return null
+    }
+    if (booking.paymentStatus === 'Paid') {
+        res.status(200).json({ success: false, message: PAY_ERRORS.already_paid })
+        return null
+    }
+
+    // The coupon saved on the booking by /booking/summary (none = full service price), checked again now
+    const price = await priceBooking(booking, customerId, booking.discountCouponCode || undefined)
+    if (price.error) {
+        res.status(200).json({ success: false, message: `${price.error} Please remove the coupon on the booking summary and try again.`, field: 'couponCode' })
+        return null
+    }
+
+    return { booking, price }
+}
+
+// The coupon columns of wl_bookings as priceBooking worked them out (saved by the summary and with the payment).
+// No coupon resets them all: ID 0, no code, discount 0.
+const couponColumns = ({ coupon, discountPaise }) => ({
+    discountCouponId: coupon ? coupon.couponId : 0,
+    discountCouponCode: coupon ? coupon.couponCode : null,
+    couponDiscountAmount: coupon ? fromPaise(discountPaise) : 0,
+})
+
+// "Payment Method" screen: wallet balance card, the payment options and the Pay Now amount
+const getPaymentMethods = async (req, res) => {
+    if (!(await validateRequestDevice(req, res))) return
+
+    const parsed = paymentMethodsSchema.safeParse(req.body)
+
+    if (!parsed.success) return sendValidationError(res, parsed.error)
+
+    try {
+        const customer = await findUser(req, res, parsed.data)
+        if (!customer) return
+
+        const payable = await findPayableBooking(res, customer.customerId, parsed.data.bookingId)
+        if (!payable) return
+
+        const { booking, price } = payable
+        const amount = fromPaise(price.totalPaise)
+        const balance = await walletBalanceFor(customer.customerId)
+        const walletEnough = toPaise(balance) >= price.totalPaise
+
+        return res.status(200).json({
+            success: true,
+            message: 'Payment methods fetched successfully',
+            data: convertNulls({
+                step: { current: 4, total: 4 },
+                bookingId: booking.bookingId,
+                bookingNumber: bookingNumber(booking.bookingId),
+                serviceName: booking.serviceName,
+                // "BEAUNIC WALLET BALANCE ₹1,000"
+                wallet: { balance, balanceLabel: rupees(balance) },
+                selectedMethod: DEFAULT_PAYMENT_METHOD,
+                methods: Object.entries(PAYMENT_METHODS).map(([key, method]) => {
+                    const isWallet = key === 'wallet'
+                    return {
+                        key,
+                        title: method.title,
+                        subtitle: isWallet ? `Balance: ${rupees(balance)}` : method.subtitle,
+                        icon: method.icon,
+                        isSelected: key === DEFAULT_PAYMENT_METHOD ? 1 : 0,
+                        // The wallet can only be chosen when it covers the whole amount
+                        isEnabled: isWallet && !walletEnough ? 0 : 1,
+                        disabledReason: isWallet && !walletEnough ? 'Insufficient wallet balance' : null,
+                        ...(key === 'upi' && { apps: Object.entries(UPI_APPS).map(([appKey, name]) => ({ key: appKey, name })) }),
+                    }
+                }),
+                priceDetails: priceDetailsOf(price),
+                amount,
+                amountLabel: rupees(amount),
+                // "PAY NOW · ₹1,299"
+                payButtonLabel: `PAY NOW · ${rupees(amount)}`,
+                secureNote: SECURE_NOTE,
+            }),
+        })
+    } catch (err) {
+        console.error('Payment methods error:', err)
+        return res.status(200).json({ success: false, message: 'Something went wrong' })
+    }
+}
+
+// "PAY NOW": pays for the User's own booking. The amount is worked out here from wl_bookings, never taken from the app.
+//   wallet: taken from the Beaunic Wallet (must cover the whole amount)
+//   upi / card / netbanking / other: paid through the payment gateway in the app; transactionId is its payment ID
+const payForBooking = async (req, res) => {
+    if (!(await validateRequestDevice(req, res))) return
+
+    const parsed = payBookingSchema.safeParse(req.body)
+
+    if (!parsed.success) return sendValidationError(res, parsed.error)
+
+    const d = parsed.data
+    const wallet = d.paymentMethod === 'wallet'
+
+    try {
+        const customer = await findUser(req, res, d)
+        if (!customer) return
+
+        const payable = await findPayableBooking(res, customer.customerId, d.bookingId)
+        if (!payable) return
+
+        const { booking, price } = payable
+        const amount = fromPaise(price.totalPaise)
+
+        // Nothing to collect when a coupon covers the whole price
+        if (!wallet && price.totalPaise > 0 && d.transactionId === undefined) {
+            return res.status(200).json({ success: false, message: 'Transaction ID is required', field: 'transactionId' })
+        }
+
+        const result = await bookingModel.payBooking({
+            bookingId: booking.bookingId,
+            customerId: customer.customerId,
+            couponCode: booking.discountCouponCode,
+            amount,
+            coupon: couponColumns(price),
+            paymentMethod: paymentMethodLabel(d.paymentMethod, d.upiApp),
+            transactionId: d.transactionId ?? null,
+            wallet,
+            now: authModel.nowString(),
+        })
+
+        if (result.error === 'wallet_low') {
+            return res.status(200).json({
+                success: false,
+                message: `Insufficient wallet balance. You have ${rupees(result.balance)} and need ${rupees(amount)}.`,
+                field: 'paymentMethod',
+            })
+        }
+        if (result.error) return res.status(200).json({ success: false, message: PAY_ERRORS[result.error] })
+
+        const paid = result.booking
+
+        return res.status(200).json({
+            success: true,
+            message: 'Payment successful',
+            data: convertNulls({
+                bookingId: paid.bookingId,
+                bookingNumber: bookingNumber(paid.bookingId),
+                serviceName: paid.serviceName,
+                paymentStatus: paid.paymentStatus,
+                paymentMethodKey: d.paymentMethod,
+                paymentMethod: paid.paymentMethod,
+                payment: paymentLabel(paid),
+                transactionId: paid.paymentTransactionId,
+                amount,
+                amountLabel: rupees(amount),
+                priceDetails: priceDetailsOf(price),
+                paymentReceivedDate: paid.paymentReceivedDate,
+                ...(wallet && { wallet: { balance: result.walletBalance, balanceLabel: rupees(result.walletBalance) } }),
+            }),
+        })
+    } catch (err) {
+        // Two requests with the same gateway transaction ID at once: the unique key stops the second
+        if (err && (err.code === 'ER_DUP_ENTRY' || err.cause?.code === 'ER_DUP_ENTRY')) {
+            return res.status(200).json({ success: false, message: PAY_ERRORS.transaction_used })
+        }
+        console.error('Pay booking error:', err)
         return res.status(200).json({ success: false, message: 'Something went wrong' })
     }
 }
@@ -1888,6 +2163,8 @@ const updateSalonBookingStatus = async (req, res) => {
 }
 
 module.exports = {
+    getPaymentMethods,
+    payForBooking,
     listCancellationRequests,
     getSalonBookingDetails,
     updateSalonBookingStatus,

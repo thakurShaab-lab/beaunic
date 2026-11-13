@@ -2,7 +2,6 @@ const { z } = require('zod')
 const { sendValidationError } = require('../utils/validationError')
 const authModel = require('../models/auth.model')
 const slotModel = require('../models/slot.model')
-const timeModel = require('../models/time.model')
 const complaintModel = require('../models/complaint.model')
 const { validateRequestDevice } = require('./device&app.controller')
 const { findLoggedInCustomer } = require('./profile.controller')
@@ -46,21 +45,49 @@ const slotDate = (label = 'Date') =>
         .regex(/^\d{4}-\d{2}-\d{2}$/, `${label} must be in YYYY-MM-DD format`)
         .refine(isRealDate, `Enter a valid ${label.toLowerCase()}`)
 
-// A wl_times ID, from /api/slot/times
-const timeIdField = (label) =>
-    z.coerce.number({ error: `${label} is required` }).int(`${label} is required`).positive(`${label} is required`)
+// "10:00 AM", "10:00am", "10 AM", "9:30 PM" or 24-hour "14:00" / "14:00:00" -> "HH:MM:SS"; null when not a time
+const toTime24 = (value) => {
+    const match = /^(\d{1,2})(?::(\d{2}))?(?::(\d{2}))?\s*([ap]\.?m\.?)?$/i.exec(String(value).trim())
+    if (!match) return null
+    let hour = Number(match[1])
+    const minute = Number(match[2] ?? 0)
+    const second = Number(match[3] ?? 0)
+    const meridiem = match[4] && match[4].replace(/\./g, '').toLowerCase()
+    if (meridiem) {
+        if (hour < 1 || hour > 12) return null
+        hour = (hour % 12) + (meridiem === 'pm' ? 12 : 0)
+    } else if (match[2] === undefined) {
+        // A bare number like "10" is ambiguous
+        return null
+    }
+    if (hour > 23 || minute > 59 || second > 59) return null
+    return [hour, minute, second].map((part) => String(part).padStart(2, '0')).join(':')
+}
+
+const timeField = (label) =>
+    z.string({ error: `${label} is required` })
+        .trim()
+        .min(1, `${label} is required`)
+        .transform((value, ctx) => {
+            const time = toTime24(value)
+            if (!time) {
+                ctx.addIssue({ code: 'custom', message: `${label} must be a time like 10:00 AM` })
+                return z.NEVER
+            }
+            return time
+        })
 
 const maxBookings = z.coerce.number({ error: 'Max bookings is required' })
     .int('Max bookings must be a whole number')
     .min(1, 'Max bookings must be at least 1')
     .max(MAX_BOOKINGS_LIMIT, `Max bookings can be at most ${MAX_BOOKINGS_LIMIT}`)
 
-// startTimeId / endTimeId: wl_times IDs (from /api/slot/times)
+// startTime / endTime: "10:00 AM" (24-hour "10:00" also accepted)
 const createSlotSchema = z.object({
     ...deviceFields,
     slotDate: slotDate(),
-    startTimeId: timeIdField('Start time'),
-    endTimeId: timeIdField('End time'),
+    startTime: timeField('Start time'),
+    endTime: timeField('End time'),
     maxBookings,
 }).strict()
 
@@ -69,12 +96,10 @@ const updateSlotSchema = z.object({
     ...deviceFields,
     slotId,
     slotDate: slotDate().optional(),
-    startTimeId: timeIdField('Start time').optional(),
-    endTimeId: timeIdField('End time').optional(),
+    startTime: timeField('Start time').optional(),
+    endTime: timeField('End time').optional(),
     maxBookings: maxBookings.optional(),
 }).strict()
-
-const listTimesSchema = z.object({ ...deviceFields }).strict()
 
 // "Select Time Slot": one salon's slots on one date, grouped Morning / Afternoon / Evening.
 // salonId: required for a User (a Salon Partner always gets their own salon).
@@ -199,81 +224,6 @@ const pastSlotError = ({ slotDate: date, startTime }) => {
 const overlapMessage = (overlap) =>
     `This time overlaps your ${timeLabel(overlap.startTime)} – ${timeLabel(overlap.endTime)} slot on ${dateParts(overlap.slotDate).label}.`
 
-// startTimeId / endTimeId (whichever are sent) -> { startTime, endTime } as "HH:MM:SS" from wl_times.
-// Sends the error and returns null when an ID is not an active time.
-const resolveTimes = async (res, { startTimeId, endTimeId }) => {
-    const ids = [startTimeId, endTimeId].filter((id) => id !== undefined)
-    if (!ids.length) return {}
-
-    const rows = await timeModel.findActiveTimesByIds([...new Set(ids)])
-    const byId = new Map(rows.map((row) => [row.timeId, row.timeValue]))
-    const times = {}
-
-    for (const [field, id, label] of [['startTime', startTimeId, 'Start time'], ['endTime', endTimeId, 'End time']]) {
-        if (id === undefined) continue
-        if (!byId.has(id)) {
-            res.status(200).json({ success: false, message: `${label} not found. Choose a time from the list.`, field: `${field}Id` })
-            return null
-        }
-        times[field] = byId.get(id)
-    }
-
-    return times
-}
-
-// formatSlot plus startTimeId / endTimeId (the wl_times rows for the slot's times; "" when a time isn't in the table)
-const formatSlotsWithTimeIds = async (slots) => {
-    const values = [...new Set(slots.flatMap((slot) => [slot.startTime, slot.endTime]))]
-    const rows = await timeModel.findTimesByValues(values)
-    const idByValue = new Map(rows.map((row) => [row.timeValue, row.timeId]))
-
-    // Same fields and order as formatSlot, with each ID placed just before its time
-    const ids = (slot) => ({ startTime: idByValue.get(slot.startTime) ?? null, endTime: idByValue.get(slot.endTime) ?? null })
-
-    return slots.map((slot) => {
-        const timeIds = ids(slot)
-        return Object.fromEntries(
-            Object.entries(formatSlot(slot)).flatMap(([key, value]) =>
-                key in timeIds ? [[`${key}Id`, timeIds[key]], [key, value]] : [[key, value]]
-            )
-        )
-    })
-}
-
-const formatSlotWithTimeIds = async (slot) => (await formatSlotsWithTimeIds([slot]))[0]
-
-// The time picker for Create / Edit Slot: active rows of wl_times, earliest first
-const listTimes = async (req, res) => {
-    if (!(await validateRequestDevice(req, res))) return
-
-    const parsed = listTimesSchema.safeParse(req.body)
-
-    if (!parsed.success) return sendValidationError(res, parsed.error)
-
-    try {
-        const customer = await findSalonPartner(req, res, parsed.data)
-        if (!customer) return
-
-        const rows = await timeModel.findActiveTimes()
-
-        return res.status(200).json({
-            success: true,
-            message: rows.length ? 'Times fetched successfully' : 'No times found',
-            data: {
-                total: rows.length,
-                times: rows.map((row) => ({
-                    timeId: row.timeId,
-                    time: hhmm(row.timeValue),
-                    timeLabel: row.timeLabel || timeLabel(row.timeValue),
-                })),
-            },
-        })
-    } catch (err) {
-        console.error('List times error:', err)
-        return res.status(200).json({ success: false, message: 'Something went wrong' })
-    }
-}
-
 // "Create Slot"
 const createSlot = async (req, res) => {
     if (!(await validateRequestDevice(req, res))) return
@@ -288,23 +238,19 @@ const createSlot = async (req, res) => {
         const customer = await findSalonPartner(req, res, d)
         if (!customer) return
 
-        // The times come from wl_times by ID
-        const times = await resolveTimes(res, d)
-        if (!times) return
-
-        if (times.endTime <= times.startTime) {
-            return res.status(200).json({ success: false, message: 'End time must be after start time', field: 'endTimeId' })
+        if (d.endTime <= d.startTime) {
+            return res.status(200).json({ success: false, message: 'End time must be after start time', field: 'endTime' })
         }
 
-        const pastError = pastSlotError({ slotDate: d.slotDate, startTime: times.startTime })
+        const pastError = pastSlotError({ slotDate: d.slotDate, startTime: d.startTime })
         if (pastError) return res.status(200).json({ success: false, message: pastError })
 
         const now = authModel.nowString()
         const values = {
             customerId: customer.customerId,
             slotDate: d.slotDate,
-            startTime: times.startTime,
-            endTime: times.endTime,
+            startTime: d.startTime,
+            endTime: d.endTime,
             maxBookings: d.maxBookings,
             bookedCount: 0,
             status: '1',
@@ -318,7 +264,7 @@ const createSlot = async (req, res) => {
         return res.status(200).json({
             success: true,
             message: 'Slot created successfully',
-            data: convertNulls({ slot: await formatSlotWithTimeIds({ ...values, slotId: result.slotId }) }),
+            data: convertNulls({ slot: formatSlot({ ...values, slotId: result.slotId }) }),
         })
     } catch (err) {
         console.error('Create slot error:', err)
@@ -378,15 +324,14 @@ const listSlots = async (req, res) => {
             slotModel.countSlotsByDate(owner.salonId, today, { activeOnly }),
         ])
 
-        const formatted = await formatSlotsWithTimeIds(slots)
         const days = []
-        for (const [i, slot] of slots.entries()) {
+        for (const slot of slots) {
             let group = days[days.length - 1]
             if (!group || group.slotDate !== slot.slotDate) {
                 group = { slotDate: slot.slotDate, dateLabel: dateParts(slot.slotDate).label, slotCount: 0, slots: [] }
                 days.push(group)
             }
-            group.slots.push(formatted[i])
+            group.slots.push(formatSlot(slot))
             group.slotCount += 1
         }
 
@@ -431,7 +376,7 @@ const updateSlot = async (req, res) => {
             return res.status(200).json({ success: false, message: 'This slot has already started and can no longer be changed.' })
         }
 
-        const changesTime = [d.slotDate, d.startTimeId, d.endTimeId].some((value) => value !== undefined)
+        const changesTime = [d.slotDate, d.startTime, d.endTime].some((value) => value !== undefined)
         if (changesTime && existing.bookedCount > 0) {
             return res.status(200).json({ success: false, message: 'This slot already has bookings, so its date and time can\'t be changed.' })
         }
@@ -440,20 +385,16 @@ const updateSlot = async (req, res) => {
             return res.status(200).json({ success: false, message: `Max bookings can't be less than the ${existing.bookedCount} booking${existing.bookedCount === 1 ? '' : 's'} already made.` })
         }
 
-        // New times come from wl_times by ID
-        const times = await resolveTimes(res, d)
-        if (!times) return
-
         const updated = {
             ...existing,
             slotDate: d.slotDate ?? existing.slotDate,
-            startTime: times.startTime ?? existing.startTime,
-            endTime: times.endTime ?? existing.endTime,
+            startTime: d.startTime ?? existing.startTime,
+            endTime: d.endTime ?? existing.endTime,
             maxBookings: d.maxBookings ?? existing.maxBookings,
         }
 
         if (hhmm(updated.endTime) <= hhmm(updated.startTime)) {
-            return res.status(200).json({ success: false, message: 'End time must be after start time', field: 'endTimeId' })
+            return res.status(200).json({ success: false, message: 'End time must be after start time', field: 'endTime' })
         }
 
         if (changesTime) {
@@ -474,7 +415,7 @@ const updateSlot = async (req, res) => {
         return res.status(200).json({
             success: true,
             message: 'Slot updated successfully',
-            data: convertNulls({ slot: await formatSlotWithTimeIds(updated) }),
+            data: convertNulls({ slot: formatSlot(updated) }),
         })
     } catch (err) {
         console.error('Update slot error:', err)
@@ -597,4 +538,4 @@ const listAvailableSlots = async (req, res) => {
     }
 }
 
-module.exports = { createSlot, listSlots, updateSlot, deleteSlot, listTimes, listAvailableSlots, salonNow, timeLabel, dateParts, hhmm, formatSlot }
+module.exports = { createSlot, listSlots, updateSlot, deleteSlot, listAvailableSlots, toTime24, salonNow, timeLabel, dateParts, hhmm, formatSlot }

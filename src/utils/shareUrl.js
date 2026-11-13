@@ -28,8 +28,9 @@ const serviceShareCode = ({ serviceId, serviceName }) => `${serviceId}-${slugify
 const serviceShareUrl = (req, service) =>
     `${shareBaseUrl(req)}${SHARE_PATH}/${serviceShareCode(service)}?ref=${serviceShareToken(service.serviceId)}`
 
-// The exact address this request was made to (protocol, host and path with its query string)
-const requestUrl = (req) => `${req.protocol}://${req.get('host')}${req.originalUrl}`
+// The exact address this request was made to (protocol, host and path with its query string). Behind Apache the
+// app is served under a path (/beaunic) that Node never sees, so SHARE_BASE_URL (which includes it) is used when set.
+const requestUrl = (req) => `${shareBaseUrl(req)}${req.originalUrl}`
 
 // Shown when a service has no image
 const noImageUrl = () => `${env.staticFileBaseUrl.replace(/\/+$/, '')}/no-image.png`

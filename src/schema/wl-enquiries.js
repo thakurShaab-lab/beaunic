@@ -1,4 +1,4 @@
-const { mysqlTable, mysqlEnum, primaryKey, int, varchar, text, datetime } = require("drizzle-orm/mysql-core");
+const { mysqlTable, mysqlEnum, primaryKey, index, int, varchar, text, datetime } = require("drizzle-orm/mysql-core");
 
 const wlEnquiries = mysqlTable("wl_enquiries", {
 	id: int().autoincrement().notNull(),
@@ -27,9 +27,17 @@ const wlEnquiries = mysqlTable("wl_enquiries", {
 	jobTitle: varchar("job_title", { length: 50 }),
 	inquiryType: varchar("inquiry_type", { length: 80 }),
 	resume: varchar({ length: 100 }),
+	// The Salon Partner's reply from the app (/api/enquiry/partner/reply); reply_status is set to Y with it
+	replySubject: varchar("reply_subject", { length: 200 }),
+	replyMessage: text("reply_message"),
+	replyDate: datetime("reply_date", { mode: 'string'}),
+	// The Salon Partner deleted it from their list (/api/enquiry/partner/delete); the admin panel still has it
+	salonDeleted: mysqlEnum("salon_deleted", ['0','1']).default('0').notNull(),
+	salonDeletedDate: datetime("salon_deleted_date", { mode: 'string'}),
 },
 (table) => [
 	primaryKey({ columns: [table.id], name: "wl_enquiries_id"}),
+	index("idx_enquiries_salon").on(table.inquiryType, table.entityId),
 ]);
 
 module.exports = { wlEnquiries };

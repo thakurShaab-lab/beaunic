@@ -1,4 +1,4 @@
-const { mysqlTable, mysqlEnum, primaryKey, index, int, decimal, float, char, varchar, text, date, time, datetime } = require("drizzle-orm/mysql-core");
+const { mysqlTable, mysqlEnum, primaryKey, index, uniqueIndex, int, decimal, float, char, varchar, text, date, time, datetime } = require("drizzle-orm/mysql-core");
 const { wlCustomers } = require("./wl-customers");
 const { wlServices } = require("./wl-services");
 const { wlBookingSlots } = require("./wl-booking-slots");
@@ -63,6 +63,8 @@ const wlBookings = mysqlTable("wl_bookings", {
 	// Payments: how the amount was received (Online vs Cash on the Payment Overview) and when
 	paymentMode: mysqlEnum("payment_mode", ['online','cash']),
 	paymentReceivedDate: datetime("payment_received_date", { mode: 'string'}),
+	// The User's own payment (/booking/pay): the gateway's transaction / payment ID, or "WALLET-{id}" for the Beaunic Wallet
+	paymentTransactionId: varchar("payment_transaction_id", { length: 100 }),
 	bookingUpdatedDate: datetime("booking_updated_date", { mode: 'string'}),
 	// Assigned employee (wl_employees), set by the Salon Partner
 	employeeId: int("employee_id"),
@@ -77,6 +79,7 @@ const wlBookings = mysqlTable("wl_bookings", {
 	index("idx_bookings_salon_id").on(table.salonId),
 	index("idx_bookings_slot_customer").on(table.slotId, table.customerId),
 	index("idx_bookings_salon_requests").on(table.salonId, table.cancelStatus, table.rescheduleStatus),
+	uniqueIndex("uq_bookings_payment_transaction_id").on(table.paymentTransactionId),
 	primaryKey({ columns: [table.bookingId], name: "wl_bookings_booking_id"}),
 ]);
 

@@ -7,6 +7,7 @@ const { wlCustomers } = require("../schema/wl-customers")
 const { wlServices } = require("../schema/wl-services")
 const { wlDurations } = require("../schema/wl-durations")
 const { wlEmployees } = require("../schema/wl-employees")
+const { wlWalletTransactions } = require("../schema/wl-wallet-transactions")
 
 // Books one place in a slot, or reports why it can't. One transaction with the slot row locked,
 // so two people can't both take the last place.
@@ -109,9 +110,22 @@ const findCustomerBooking = (customerId, bookingId) => findBookingWithDetails(bo
 // Partner: one of the salon's own bookings
 const findSalonBooking = (salonId, bookingId) => findBookingWithDetails(bookingId, eq(wlBookings.salonId, salonId))
 
-// Saves the coupon (or its removal) and the amount now payable on a booking
-const updateBookingCoupon = async (bookingId, values) => {
-    await db.update(wlBookings).set(values).where(eq(wlBookings.bookingId, bookingId))
+// Saves the coupon (or its removal) and the amount now payable on the customer's own booking. Only a booking that is
+// still Booked and Unpaid is changed, so a payment made meanwhile is never overwritten. Returns true when saved.
+const updateBookingCoupon = async (bookingId, customerId, values) => {
+    const [result] = await db
+        .update(wlBookings)
+        .set(values)
+        .where(
+            and(
+                eq(wlBookings.bookingId, bookingId),
+                eq(wlBookings.customerId, customerId),
+                eq(wlBookings.orderStatus, "Booked"),
+                eq(wlBookings.paymentStatus, "Unpaid")
+            )
+        )
+
+    return result.affectedRows > 0
 }
 
 // The customer's own booking, locked for the rest of the transaction
@@ -371,6 +385,93 @@ const recordPayment = async ({ bookingId, salonId, paymentMode, paymentMethod, n
         return { booking: { ...booking, ...values } }
     })
 
+// The User pays for their own booking (/booking/pay). The amount is worked out by the caller (same rules as the
+// Booking Summary) and is only accepted if the booking still has the coupon it was worked out with.
+// wallet: true takes the amount from the Beaunic Wallet (a debit of category booking_payment); otherwise
+// transactionId is the payment gateway's ID for the payment.
+// Returns { error } or { booking, walletTransactionId, walletBalance }.
+//   errors: not_found, cancelled, closed, already_paid, price_changed, transaction_used, wallet_low (with balance)
+const payBooking = async ({ bookingId, customerId, couponCode, amount, coupon, paymentMethod, transactionId, wallet, now }) =>
+    db.transaction(async (tx) => {
+        const [booking] = await tx
+            .select()
+            .from(wlBookings)
+            .where(and(eq(wlBookings.bookingId, bookingId), eq(wlBookings.customerId, customerId)))
+            .limit(1)
+            .for("update")
+        if (!booking) return { error: "not_found" }
+        if (booking.isCancel === "1" || booking.orderStatus === "Cancelled") return { error: "cancelled" }
+        if (booking.orderStatus !== "Booked") return { error: "closed" }
+        if (booking.paymentStatus === "Paid") return { error: "already_paid" }
+        // The coupon changed (e.g. on the summary screen in another tab) after the amount was worked out
+        if ((booking.discountCouponCode || null) !== (couponCode || null)) return { error: "price_changed" }
+
+        if (!wallet) {
+            const [used] = await tx
+                .select({ bookingId: wlBookings.bookingId })
+                .from(wlBookings)
+                .where(eq(wlBookings.paymentTransactionId, transactionId))
+                .limit(1)
+            if (used) return { error: "transaction_used" }
+        }
+
+        let walletTransactionId = null
+        let walletBalance = null
+        if (wallet) {
+            // Locks the customer's row so two payments can't spend the same balance
+            await tx.select({ id: wlCustomers.customerId }).from(wlCustomers).where(eq(wlCustomers.customerId, customerId)).for("update")
+            walletBalance = await walletBalanceOf(tx, customerId)
+            if (Math.round(walletBalance * 100) < Math.round(amount * 100)) return { error: "wallet_low", balance: walletBalance }
+
+            if (amount > 0) {
+                const [result] = await tx.insert(wlWalletTransactions).values({
+                    customerId,
+                    transactionType: "debit",
+                    category: "booking_payment",
+                    amount: amount.toFixed(2),
+                    referenceNumber: `BK-${bookingId}`,
+                    referenceId: bookingId,
+                    description: `Paid for ${booking.serviceName || "booking"}`,
+                    paymentMethod: "Beaunic Wallet",
+                    status: "1",
+                    transactionAddedDate: now,
+                })
+                walletTransactionId = result.insertId
+            }
+            walletBalance = Number((walletBalance - amount).toFixed(2))
+        }
+
+        const values = {
+            ...coupon,
+            totalAmount: amount.toFixed(2),
+            paymentStatus: "Paid",
+            paymentMode: "online",
+            paymentMethod,
+            paymentTransactionId: wallet ? (walletTransactionId ? `WALLET-${walletTransactionId}` : null) : transactionId,
+            paymentReceivedDate: now,
+            bookingUpdatedDate: now,
+        }
+        await tx.update(wlBookings).set(values).where(eq(wlBookings.bookingId, bookingId))
+
+        return { booking: { ...booking, ...values }, walletTransactionId, walletBalance }
+    })
+
+// Wallet balance read inside a transaction; same rule as the Beaunic Wallet screen (wallet.model findWalletSummary):
+// cashback + other credits - debits, completed transactions only
+const walletBalanceOf = async (tx, customerId) => {
+    const w = wlWalletTransactions
+    const [row] = await tx
+        .select({
+            balance: sql`COALESCE(SUM(CASE
+                WHEN ${w.category} = 'cashback' THEN ${w.amount}
+                WHEN ${w.transactionType} = 'credit' THEN ${w.amount}
+                ELSE 0 END), 0) - COALESCE(SUM(CASE WHEN ${w.transactionType} = 'debit' THEN ${w.amount} ELSE 0 END), 0)`.mapWith(Number),
+        })
+        .from(w)
+        .where(and(eq(w.customerId, customerId), eq(w.status, "1")))
+    return Number(row.balance)
+}
+
 // The booking status (the tabs), from the stored status only. A booking stays Upcoming until the Salon Partner
 // marks it Completed or Cancelled (or approves the customer's cancellation); the clock never moves it.
 //   cancelled: is_cancel 1 or status Cancelled
@@ -571,6 +672,7 @@ module.exports = {
     findSalonRequests,
     countPendingRequests,
     recordPayment,
+    payBooking,
     findCustomerBookings,
     countCustomerBookingsByTab,
     // In the order the tabs appear on My Bookings
