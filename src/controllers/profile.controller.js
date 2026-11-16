@@ -10,6 +10,8 @@ const addressModel = require('../models/address.model')
 const membershipModel = require('../models/membership.model')
 const bankDetailsModel = require('../models/bankDetails.model')
 const geoModel = require('../models/geo.model')
+const bookingModel = require('../models/booking.model')
+const favoriteModel = require('../models/favorite.model')
 const { validateRequestDevice } = require('./device&app.controller')
 const { detectImageExt, UPLOAD_DIR } = require('./auth.controller')
 const { contactAndAddressFields, toAddressColumns, formatOrderAddress, optionalText, noMarkup, checkCountryAndCity, savedId } = require('./address.controller')
@@ -141,11 +143,13 @@ const findLoggedInCustomer = async (req, res, { app_id, device_id }) => {
 }
 
 const buildProfile = async (req, customerId) => {
-    const [customer, savedAddress, membership, bank] = await Promise.all([
+    const [customer, savedAddress, membership, bank, favoriteCount] = await Promise.all([
         authModel.findProfile(customerId),
         addressModel.findDefaultAddress(customerId),
         membershipModel.findActiveMembership(customerId),
         bankDetailsModel.findBankDetails(customerId),
+        // Same count as the favorites list
+        favoriteModel.countCustomerFavorites(customerId),
     ])
 
     const address = savedAddress || {
@@ -164,6 +168,11 @@ const buildProfile = async (req, customerId) => {
     const additionalContactNumbers = address.additionalNumbers ? address.additionalNumbers.split(',') : []
 
     const isSalonPartner = customer.customerType === '1'
+
+    // Bookings: a User's own (the "All" tab of My Bookings); a Salon Partner's, the bookings made at their salon
+    const bookingCounts = isSalonPartner
+        ? await bookingModel.countSalonBookingsByTab(customerId, {})
+        : await bookingModel.countCustomerBookingsByTab(customerId, {})
 
     const checklist = [
         customer.firstName,
@@ -187,8 +196,8 @@ const buildProfile = async (req, customerId) => {
         customerType: customer.customerType,
         // null when the file is missing
         logoUrl: await resolveMediaUrl(req, 'salon_logos', customer.customerPhoto, null, env.staticFileBaseUrl),
-        bookings: '5',
-        favorites: '4',
+        bookings: String(bookingCounts.total),
+        favorites: String(favoriteCount),
         notofications: '3',
         salonName: customer.salonName,
         ownerName: customer.firstName,
