@@ -391,4 +391,88 @@ const changePassword = async (req, res) => {
     }
 }
 
-module.exports = { getProfile, updateProfile, changePassword, findLoggedInCustomer }
+const formatPhone = (value) => {
+    const digits = String(value || '').replace(/\D/g, '')
+    if (!digits) return null
+    if (/^1800\d{7}$/.test(digits)) return `${digits.slice(0, 4)} ${digits.slice(4, 7)} ${digits.slice(7)}`
+    if (/^\d{10}$/.test(digits)) return `${digits.slice(0, 5)} ${digits.slice(5)}`
+    return String(value).trim()
+}
+
+const getPartnerProfile = async (req, res) => {
+    if (!(await validateRequestDevice(req, res))) return
+
+    const parsed = getProfileSchema.safeParse(req.body)
+
+    if (!parsed.success) return sendValidationError(res, parsed.error)
+
+    try {
+        const customer = await findLoggedInCustomer(req, res, parsed.data)
+        if (!customer) return
+
+        if (customer.customerType !== '1') {
+            return res.status(200).json({ success: false, message: 'This feature is only available for Salon Partners.' })
+        }
+
+        // buildProfile returns "" for anything not saved
+        const profile = await buildProfile(req, customer.customerId)
+
+        // Main number first, then the additional ones, each once: "98765 43210 · 91234 56780"
+        const contactNumbers = [...new Set([profile.contactNumber, ...profile.additionalContactNumbers]
+            .map((number) => String(number || '').trim()).filter(Boolean))]
+        const supportNumber = String(profile.customerSupportNumber || '').trim()
+        // "Station Road, Dildarnagar, Uttar Pradesh, 232326" (no country on this screen)
+        const displayAddress = [profile.address.address, profile.address.location, profile.address.stateName, profile.address.pinCode]
+            .map((part) => String(part || '').trim()).filter(Boolean).join(', ')
+
+        const membershipActive = profile.membership.isActive
+        const planName = profile.membership.planName || null
+
+        return res.status(200).json({
+            success: true,
+            message: 'Profile fetched successfully',
+            data: convertNulls({
+                title: 'My Salon Profile',
+                salonId: profile.customerId,
+                // Header card
+                logoUrl: profile.logoUrl || null,
+                salonName: profile.salonName || null,
+                // "Aura Beauty Services Pvt. Ltd." — not stored yet (no company name column), so always blank for now
+                companyName: null,
+                ownerName: profile.ownerName || null,
+                // "Membership Active" and "Salon" chips
+                badges: [
+                    { key: 'membership', label: membershipActive ? 'Membership Active' : 'No Active Membership', isActive: membershipActive ? 1 : 0 },
+                    ...(profile.serviceTypeLabel ? [{ key: 'serviceType', label: profile.serviceTypeLabel, isActive: 1 }] : []),
+                ],
+                serviceType: profile.serviceType || null,
+                serviceTypeLabel: profile.serviceTypeLabel || null,
+                profileCompletion: profile.profileCompletion,
+                profileCompletionLabel: `${profile.profileCompletion}%`,
+                // Details card
+                emailId: profile.emailId || null,
+                contactNumbers,
+                contactNumbersLabel: contactNumbers.map(formatPhone).join(' · ') || null,
+                customerSupportNumber: supportNumber || null,
+                customerSupportNumberLabel: formatPhone(supportNumber),
+                address: {
+                    ...profile.address,
+                    displayAddress: displayAddress || null,
+                },
+                // "Professional Plan · Active"
+                membership: {
+                    isActive: membershipActive ? 1 : 0,
+                    planName,
+                    status: membershipActive ? 'Active' : 'Inactive',
+                    validUntil: profile.membership.validUntil || null,
+                    label: membershipActive ? [planName, 'Active'].filter(Boolean).join(' · ') : 'No active membership',
+                },
+            }),
+        })
+    } catch (err) {
+        console.error('Partner profile error:', err)
+        return res.status(200).json({ success: false, message: 'Something went wrong' })
+    }
+}
+
+module.exports = { getProfile, getPartnerProfile, updateProfile, changePassword, findLoggedInCustomer }

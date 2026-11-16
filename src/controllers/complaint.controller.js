@@ -7,6 +7,7 @@ const { findLoggedInCustomer } = require('./profile.controller')
 const { noMarkup } = require('./address.controller')
 const { convertNulls } = require('../utils/convertNulls')
 const { formatDate } = require('../utils/formatDate')
+const { istDateLabels } = require('../utils/istDateLabels')
 
 // wl_complaints.status
 const STATUS = { PENDING: '1', IN_PROGRESS: '2', RESOLVED: '3', CLOSED: '4' }
@@ -450,4 +451,107 @@ const updateComplaintStatus = async (req, res) => {
     }
 }
 
-module.exports = { addComplaint, listComplaints, getConversation, replyToComplaint, updateComplaintStatus }
+// ---------------------------------------------------------------------------------------------------------------
+// Salon Partner: "Complaints" screen — one API for both tabs (Open = Pending + In Progress, Resolved = Resolved + Closed)
+
+const DEFAULT_PAGE_SIZE = 10
+const MAX_PAGE_SIZE = 50
+
+const PARTNER_TABS = [
+    { key: 'open', label: 'Open', statuses: OPEN_STATUSES },
+    { key: 'resolved', label: 'Resolved', statuses: DONE_STATUSES },
+]
+
+const partnerComplaintsSchema = z.object({
+    ...deviceFields,
+    // "open" (default) or "resolved"; "Open", "RESOLVED" etc. are accepted too
+    tab: z.preprocess(
+        (value) => (typeof value === 'string' ? value.trim().toLowerCase() : value),
+        z.enum(PARTNER_TABS.map((tab) => tab.key), { error: 'Tab must be open or resolved' }).optional()
+    ),
+    page: z.coerce.number({ error: 'Page must be a number' }).int().min(1, 'Page must be at least 1').optional(),
+    limit: z.coerce.number({ error: 'Limit must be a number' }).int().min(1, 'Limit must be at least 1').max(MAX_PAGE_SIZE, `Limit can be at most ${MAX_PAGE_SIZE}`).optional(),
+}).strict()
+
+const listPartnerComplaints = async (req, res) => {
+    if (!(await validateRequestDevice(req, res))) return
+
+    const parsed = partnerComplaintsSchema.safeParse(req.body)
+
+    if (!parsed.success) return sendValidationError(res, parsed.error)
+
+    const d = parsed.data
+    const selected = PARTNER_TABS.find((tab) => tab.key === (d.tab ?? 'open'))
+    const page = d.page ?? 1
+    const limit = d.limit ?? DEFAULT_PAGE_SIZE
+
+    try {
+        const customer = await findCustomer(req, res, d, '1')
+        if (!customer) return
+
+        const [complaints, statusCounts] = await Promise.all([
+            complaintModel.findComplaints(customer, { statuses: selected.statuses, limit, offset: (page - 1) * limit }),
+            complaintModel.countComplaintsByStatus(customer),
+        ])
+
+        const summaries = await complaintModel.findReplySummaries(complaints.map((complaint) => complaint.complaintId))
+        const countOf = (statuses) => statusCounts.filter((row) => statuses.includes(row.status)).reduce((sum, row) => sum + Number(row.total), 0)
+        const total = countOf(selected.statuses)
+        const totalPages = Math.ceil(total / limit)
+
+        return res.status(200).json({
+            success: true,
+            message: complaints.length ? 'Complaints fetched successfully' : `No ${selected.label.toLowerCase()} complaints`,
+            data: convertNulls({
+                title: 'Complaints',
+                selectedTab: selected.key,
+                // "Open · 2", "Resolved · 1"
+                tabs: PARTNER_TABS.map((tab) => {
+                    const tabCount = countOf(tab.statuses)
+                    return { key: tab.key, label: tab.label, count: tabCount, title: `${tab.label} · ${tabCount}`, isSelected: tab.key === selected.key ? 1 : 0 }
+                }),
+                complaints: complaints.map((complaint) => {
+                    const item = formatComplaint(complaint, summaries.find((row) => row.complaintId === complaint.complaintId))
+                    const added = istDateLabels(complaint.complaintAddedDate)
+
+                    return {
+                        complaintId: item.complaintId,
+                        complaintNumber: item.complaintNumber,
+                        orderId: item.orderId,
+                        orderNumber: item.orderNumber,
+                        // "CMP-118 · BK-24030"
+                        referenceLabel: [item.complaintNumber, item.orderNumber].filter(Boolean).join(' · '),
+                        customerId: item.customer.customerId,
+                        customerName: item.customer.name,
+                        initials: item.customer.initials,
+                        subject: item.subject,
+                        description: item.description,
+                        // The chip: "Open" / "Resolved"; status and statusLabel keep the exact state (Pending, In Progress, ...)
+                        badgeLabel: item.isOpen ? 'Open' : 'Resolved',
+                        status: item.status,
+                        statusLabel: item.statusLabel,
+                        isOpen: item.isOpen ? 1 : 0,
+                        canReply: item.canReply ? 1 : 0,
+                        actionLabel: item.canReply ? 'View & Reply' : 'View',
+                        messageCount: item.messageCount,
+                        lastMessage: item.lastMessage,
+                        order: item.order,
+                        // "06 Oct 2026" (Indian time)
+                        complaintDate: added.date,
+                        complaintTime: added.time,
+                        complaintDateTime: added.dateTime,
+                        addedAt: item.addedAt,
+                        updatedAt: item.updatedAt,
+                        resolvedAt: item.resolvedAt,
+                    }
+                }),
+                pagination: { page, limit, total, totalPages, hasNextPage: page < totalPages },
+            }),
+        })
+    } catch (err) {
+        console.error('Partner complaints error:', err)
+        return res.status(200).json({ success: false, message: 'Something went wrong' })
+    }
+}
+
+module.exports = { addComplaint, listComplaints, listPartnerComplaints, getConversation, replyToComplaint, updateComplaintStatus }

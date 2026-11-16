@@ -177,4 +177,133 @@ const purchaseMembership = async (req, res) => {
     }
 }
 
-module.exports = { listMemberships, purchaseMembership, findSalonPartner }
+// ---------------------------------------------------------------------------------------------------------------
+// Salon Partner: "My Membership" — the logged-in partner's current (or last) membership with its features
+
+const myMembershipSchema = z.object({
+    app_id: z.union([z.string(), z.number()]),
+    device_id: z.string().trim().min(1, 'Device ID is required'),
+}).strict()
+
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+
+// "2027-10-12" -> "12 Oct 2027"
+const dateLabel = (value) => {
+    const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(value || '')
+    if (!match || match[1] === '0000') return null
+    return `${match[3]} ${MONTHS[Number(match[2]) - 1]} ${match[1]}`
+}
+
+// 5999 -> "₹5,999", 499.5 -> "₹499.50"
+const rupees = (amount) =>
+    `₹${Number(amount).toLocaleString('en-IN', Number.isInteger(Number(amount)) ? {} : { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+
+// 12 -> "Year", 1 -> "Month", 24 -> "2 Years", 6 -> "6 Months" (the "/ Year" after the price)
+const periodLabel = (months) => {
+    if (!months) return null
+    if (months % 12 === 0) return months === 12 ? 'Year' : `${months / 12} Years`
+    return months === 1 ? 'Month' : `${months} Months`
+}
+
+const decodeEntities = (text) =>
+    text.replace(/&nbsp;/g, ' ').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#0?39;/g, "'").replace(/&amp;/g, '&')
+
+// The plan's features, saved from the admin editor: "<ul><li>Wallet Management</li>...</ul>" -> ["Wallet Management", ...].
+// Plain text is split into lines.
+const featureList = (html) => {
+    if (!html) return []
+    const items = [...String(html).matchAll(/<li[^>]*>([\s\S]*?)<\/li>/gi)].map((match) => match[1])
+    const lines = items.length ? items : String(html).replace(/<br\s*\/?>/gi, '\n').replace(/<\/(p|div)>/gi, '\n').split(/\r?\n/)
+    return lines.map((line) => decodeEntities(line.replace(/<[^>]*>/g, '')).replace(/\s+/g, ' ').trim()).filter(Boolean)
+}
+
+// Whole days from today (UTC, as findActiveMembership) to the end date; negative once it has ended
+const daysUntil = (endDate) => Math.round((Date.parse(`${endDate}T00:00:00Z`) - Date.parse(`${membershipModel.todayString()}T00:00:00Z`)) / 86400000)
+
+const myMembership = async (req, res) => {
+    if (!(await validateRequestDevice(req, res))) return
+
+    const parsed = myMembershipSchema.safeParse(req.body)
+
+    if (!parsed.success) return sendValidationError(res, parsed.error)
+
+    try {
+        // The partner from the login token (same checks as findSalonPartner, which takes customerId from the body)
+        const customer = await findSalonPartner(res, { ...parsed.data, customerId: req.user.customerId })
+        if (!customer) return
+
+        const [membership, profile] = await Promise.all([
+            membershipModel.findLatestMembership(customer.customerId),
+            authModel.findProfile(customer.customerId),
+        ])
+        const memberName = (profile && (profile.salonName || profile.firstName)) || null
+
+        if (!membership) {
+            return res.status(200).json({
+                success: true,
+                message: 'You have no membership yet',
+                data: convertNulls({ title: 'My Membership', hasMembership: 0, memberName, membership: null, features: [] }),
+            })
+        }
+
+        const today = membershipModel.todayString()
+        const status = membership.startDate && membership.startDate > today ? 'upcoming'
+            : membership.endDate && membership.endDate >= today ? 'active' : 'expired'
+        const statusLabel = { active: 'Active', expired: 'Expired', upcoming: 'Upcoming' }[status]
+        const daysLeft = membership.endDate ? Math.max(daysUntil(membership.endDate), 0) : null
+        const price = Number(membership.price ?? membership.totalPrice ?? 0)
+        const period = periodLabel(membership.duration)
+        const isFree = price === 0
+        const features = featureList(membership.features || membership.planDescription)
+        const validity = dateLabel(membership.endDate)
+
+        return res.status(200).json({
+            success: true,
+            message: status === 'expired' ? 'Your membership has expired' : 'Membership details fetched successfully',
+            data: convertNulls({
+                title: 'My Membership',
+                hasMembership: 1,
+                // Card: "CURRENT MEMBERSHIP", "₹5,999 / Year", "Professional Plan", Member, Validity, Active
+                membership: {
+                    orderId: membership.orderId,
+                    invoiceNumber: membership.invoiceNumber,
+                    membershipId: membership.membershipId,
+                    cardLabel: status === 'expired' ? 'LAST MEMBERSHIP' : 'CURRENT MEMBERSHIP',
+                    planName: membership.membershipName,
+                    // The plan's tag in the admin panel ("Popular")
+                    planTag: membership.planTag,
+                    price,
+                    priceLabel: isFree ? 'Free' : rupees(price),
+                    period,
+                    // "₹5,999 / Year"
+                    priceWithPeriod: isFree ? 'Free' : [rupees(price), period].filter(Boolean).join(' / '),
+                    isFree: isFree ? 1 : 0,
+                    memberName,
+                    validity,
+                    validityLabel: validity ? validity.toUpperCase() : null,
+                    // Details: Membership Status, Duration, Start Date, Expiry Date
+                    status,
+                    statusLabel,
+                    isActive: status === 'active' ? 1 : 0,
+                    durationMonths: membership.duration,
+                    durationLabel: membership.duration ? `${membership.duration} ${membership.duration === 1 ? 'Month' : 'Months'}` : null,
+                    startDate: membership.startDate,
+                    startDateLabel: dateLabel(membership.startDate),
+                    expiryDate: membership.endDate,
+                    expiryDateLabel: validity,
+                    daysLeft,
+                    paymentStatus: membership.paymentStatus,
+                    purchasedOn: membership.purchasedOn,
+                },
+                // "PACKAGE FEATURES"
+                featuresTitle: 'PACKAGE FEATURES',
+                features,
+            }),
+        })
+    } catch (err) {
+        console.error('My membership error:', err)
+        return res.status(200).json({ success: false, message: 'Something went wrong' })
+    }
+}
+
+module.exports = { listMemberships, purchaseMembership, myMembership, findSalonPartner }

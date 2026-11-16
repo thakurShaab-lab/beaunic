@@ -54,8 +54,9 @@ const createComplaint = async (values) => {
 
 // The viewer's complaints with both parties' names and the booking details from wl_bookings, newest first.
 // Optional filters: complaintId (one complaint) and statuses (list of status values); unset ones are ignored.
-const findComplaints = async (customer, { complaintId, statuses } = {}) =>
-    db
+// limit / offset give one page; without limit every complaint is returned.
+const findComplaints = async (customer, { complaintId, statuses, limit, offset } = {}) => {
+    const query = db
         .select({
             complaintId: wlComplaints.complaintId,
             customerId: wlComplaints.customerId,
@@ -90,6 +91,10 @@ const findComplaints = async (customer, { complaintId, statuses } = {}) =>
             )
         )
         .orderBy(desc(wlComplaints.complaintId))
+        .$dynamic()
+
+    return limit ? query.limit(limit).offset(offset ?? 0) : query
+}
 
 const findComplaint = async (customer, complaintId) => (await findComplaints(customer, { complaintId }))[0] || null
 
