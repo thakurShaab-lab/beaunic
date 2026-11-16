@@ -2,6 +2,7 @@ const { z } = require('zod')
 const { sendValidationError } = require('../utils/validationError')
 const authModel = require('../models/auth.model')
 const slotModel = require('../models/slot.model')
+const bookingModel = require('../models/booking.model')
 const complaintModel = require('../models/complaint.model')
 const { validateRequestDevice } = require('./device&app.controller')
 const { findLoggedInCustomer } = require('./profile.controller')
@@ -103,7 +104,8 @@ const updateSlotSchema = z.object({
 
 // "Select Time Slot": one salon's slots on one date, grouped Morning / Afternoon / Evening.
 // salonId: required for a User (a Salon Partner always gets their own salon).
-// showUnavailable: 1 also returns booked / already-started slots (isAvailable 0, shown struck through)
+// Booked (full) slots are always returned with isAvailable 0 (shown struck through);
+// showUnavailable: 1 also returns slots that have already started today
 const availableSlotsSchema = z.object({
     ...deviceFields,
     salonId: z.coerce.number({ error: 'Salon ID must be a number' }).int().positive('Salon ID must be a number').optional(),
@@ -278,7 +280,7 @@ const findSlotOwner = async (req, res, data) => {
     const customer = await findLoggedInCustomer(req, res, data)
     if (!customer) return null
 
-    if (customer.customerType === '1') return { salonId: customer.customerId, salon: null, isUser: false }
+    if (customer.customerType === '1') return { salonId: customer.customerId, salon: null, isUser: false, customerId: customer.customerId }
 
     if (data.salonId === undefined) {
         res.status(200).json({ success: false, message: 'Salon ID is required', field: 'salonId' })
@@ -291,7 +293,7 @@ const findSlotOwner = async (req, res, data) => {
         return null
     }
 
-    return { salonId: salon.salonId, salon, isUser: true }
+    return { salonId: salon.salonId, salon, isUser: true, customerId: customer.customerId }
 }
 
 // "Manage Slots" (Salon Partner) / a salon's slots (User): slots grouped by day, plus the date strip.
@@ -483,16 +485,23 @@ const listAvailableSlots = async (req, res) => {
 
         // Only active slots, for the User and the partner alike (this is the booking screen)
         const slots = await slotModel.findCustomerSlots(owner.salonId, { slotDate: date, activeOnly: true })
+        // The logged-in customer's own bookings among these slots (one query); other customers' bookings don't count
+        const myBookedSlotIds = await bookingModel.findCustomerBookedSlotIds(owner.customerId, slots.map((slot) => slot.slotId))
 
         const groups = DAY_PARTS.map((part) => ({ key: part.key, label: part.label, icon: part.icon, count: 0, slots: [] }))
         let totalAvailable = 0
+        let totalBooked = 0
+        let hasUnavailable = false
 
         for (const slot of slots) {
             const start = hhmm(slot.startTime)
             const full = slot.bookedCount >= slot.maxBookings
             const started = date === now.date && start <= now.time
             const isAvailable = !full && !started
-            if (!isAvailable && !showUnavailable) continue
+            // Booked slots are always listed; slots that have already started only with showUnavailable
+            if (!isAvailable && !full && !showUnavailable) continue
+            if (!isAvailable) hasUnavailable = true
+            if (full && !started) totalBooked += 1
 
             const group = groups[DAY_PARTS.findIndex((part) => start >= part.from && start < part.to)]
             group.slots.push({
@@ -506,6 +515,8 @@ const listAvailableSlots = async (req, res) => {
                 availableCount: Math.max(slot.maxBookings - slot.bookedCount, 0),
                 // 1 = can be picked; 0 = "Booked or unavailable" (struck through)
                 isAvailable: isAvailable ? 1 : 0,
+                // 1 = the logged-in customer has booked this slot (not cancelled); 0 = they haven't
+                isBooked: myBookedSlotIds.has(slot.slotId) ? 1 : 0,
                 unavailableReason: isAvailable ? null : full ? 'booked' : 'started',
             })
             if (isAvailable) {
@@ -519,17 +530,21 @@ const listAvailableSlots = async (req, res) => {
 
         return res.status(200).json({
             success: true,
-            message: totalAvailable ? 'Time slots fetched successfully' : 'No time slots available on this date',
+            message: totalAvailable ? 'Time slots fetched successfully'
+                : totalBooked ? 'All time slots are booked on this date' : 'No time slots available on this date',
             data: convertNulls({
                 ...(salon && { salon }),
                 // The date bar: "Wed, 07 Oct 2026"
                 date,
                 dateLabel: dateParts(date).label,
+                // 1 = at least one slot on this date can be booked; 0 = all booked / started, or no slots
+                isAvailable: totalAvailable > 0 ? 1 : 0,
                 totalAvailable,
+                totalBooked,
                 morning,
                 afternoon,
                 evening,
-                legend: showUnavailable ? { label: 'Booked or unavailable' } : null,
+                legend: showUnavailable || hasUnavailable ? { label: 'Booked or unavailable' } : null,
             }),
         })
     } catch (err) {

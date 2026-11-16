@@ -1,4 +1,4 @@
-const { eq, and, sql, asc, desc, count } = require("drizzle-orm")
+const { eq, and, sql, asc, desc, count, inArray } = require("drizzle-orm")
 const { alias } = require("drizzle-orm/mysql-core")
 const db = require("../config/drizzle")
 const { wlBookingSlots } = require("../schema/wl-booking-slots")
@@ -655,7 +655,27 @@ const assignEmployee = async ({ bookingId, salonId, employeeId, now }) =>
         return { booking: { ...booking, ...values }, employee }
     })
 
+// Which of these slots the customer holds a booking in (not cancelled): one query for the whole list.
+// Used by "Select Time Slot" to mark the customer's own bookings (isBooked).
+const findCustomerBookedSlotIds = async (customerId, slotIds) => {
+    if (!slotIds.length) return new Set()
+
+    const rows = await db
+        .selectDistinct({ slotId: wlBookings.slotId })
+        .from(wlBookings)
+        .where(
+            and(
+                eq(wlBookings.customerId, customerId),
+                inArray(wlBookings.slotId, slotIds),
+                sql`NOT (${wlBookings.isCancel} = '1' OR ${wlBookings.orderStatus} = 'Cancelled')`
+            )
+        )
+
+    return new Set(rows.map((row) => row.slotId))
+}
+
 module.exports = {
+    findCustomerBookedSlotIds,
     findSalonCancellationRequests,
     countSalonCancellationRequests,
     findSalonBooking,
