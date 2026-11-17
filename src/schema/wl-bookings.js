@@ -54,6 +54,7 @@ const wlBookings = mysqlTable("wl_bookings", {
 	requestedSlotDate: date("requested_slot_date", { mode: 'string'}),
 	requestedStartTime: time("requested_start_time"),
 	requestedEndTime: time("requested_end_time"),
+	rescheduleReason: text("reschedule_reason"),                                                  // What the customer wrote with the request
 	previousSlotId: int("previous_slot_id"),
 	previousSlotDate: date("previous_slot_date", { mode: 'string'}),
 	previousStartTime: time("previous_start_time"),

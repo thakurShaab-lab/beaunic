@@ -1,5 +1,5 @@
 const express = require('express')
-const { createBooking, getBookingSummary, getPaymentMethods, payForBooking, getBookingSuccess, getCancelOptions, cancelBooking, rescheduleBooking, listBookings, getBookingDetails, listBookingRequests, respondBookingRequest, recordBookingPayment, listSalonBookings, getSalonBookingDetails, updateSalonBookingStatus, listCancellationRequests } = require('../controllers/booking.controller')
+const { createBooking, getBookingSummary, getPaymentMethods, payForBooking, getBookingSuccess, getCancelOptions, cancelBooking, rescheduleBooking, listBookings, getBookingDetails, listBookingRequests, respondBookingRequest, recordBookingPayment, listSalonBookings, getSalonBookingDetails, updateSalonBookingStatus, listCancellationRequests, getRescheduleRequestDetails, getCancellationRequestDetails, getInvoice, downloadInvoice } = require('../controllers/booking.controller')
 const { jwtAuthMiddleware, deviceAuthMiddleware } = require('../middleware/auth.middleware')
 const { parsePayload } = require('../middleware/payload.middleware')
 
@@ -19,6 +19,9 @@ router.post('/reschedule', jwtAuthMiddleware, parsePayload(), deviceAuthMiddlewa
 router.post('/create', jwtAuthMiddleware, parsePayload(), deviceAuthMiddleware, createBooking)
 router.post('/list', jwtAuthMiddleware, parsePayload(), deviceAuthMiddleware, listBookings)
 router.post('/details', jwtAuthMiddleware, parsePayload(), deviceAuthMiddleware, getBookingDetails)
+// 'Invoice' sheet and 'Download Invoice' (a PDF file)
+router.post('/invoice', jwtAuthMiddleware, parsePayload(), deviceAuthMiddleware, getInvoice)
+router.post('/invoice/download', jwtAuthMiddleware, parsePayload(), deviceAuthMiddleware, downloadInvoice)
 
 // Salon Partners (customer_type 1)
 router.post('/requests', jwtAuthMiddleware, parsePayload(), deviceAuthMiddleware, listBookingRequests)
@@ -29,5 +32,9 @@ router.post('/partner/details', jwtAuthMiddleware, parsePayload(), deviceAuthMid
 router.post('/partner/status', jwtAuthMiddleware, parsePayload(), deviceAuthMiddleware, updateSalonBookingStatus)
 // 'Cancellation Requests': the customers' cancellation requests for the partner's own salon
 router.post('/partner/cancellation-requests', jwtAuthMiddleware, parsePayload(), deviceAuthMiddleware, listCancellationRequests)
+// 'Cancellation Details': one booking's cancellation request (Approved / Rejected via /requests/respond)
+router.post('/partner/cancellation-request', jwtAuthMiddleware, parsePayload(), deviceAuthMiddleware, getCancellationRequestDetails)
+// 'Reschedule Request': one booking's reschedule request (Approve / Reject via /requests/respond)
+router.post('/partner/reschedule-request', jwtAuthMiddleware, parsePayload(), deviceAuthMiddleware, getRescheduleRequestDetails)
 
 module.exports = router

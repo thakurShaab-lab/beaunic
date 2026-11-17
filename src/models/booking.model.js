@@ -209,7 +209,7 @@ const requestCancellation = async ({ bookingId, customerId, checkBooking, cancel
 // Customer: asks to move to another slot of the same salon. The slot is checked now and again on approval;
 // nothing moves until the partner approves.
 // Returns { error } or { booking, slot }
-const requestReschedule = async ({ bookingId, customerId, newSlotId, checkBooking, checkSlot, now }) =>
+const requestReschedule = async ({ bookingId, customerId, newSlotId, rescheduleReason, checkBooking, checkSlot, now }) =>
     db.transaction(async (tx) => {
         const booking = await lockCustomerBooking(tx, customerId, bookingId)
         if (!booking) return { error: "not_found" }
@@ -226,6 +226,8 @@ const requestReschedule = async ({ bookingId, customerId, newSlotId, checkBookin
             requestedSlotDate: slot.slotDate,
             requestedStartTime: slot.startTime,
             requestedEndTime: slot.endTime,
+            // Optional; a new request replaces the previous request's reason
+            rescheduleReason: rescheduleReason || null,
             rescheduleRequestedDate: now,
             rescheduleRespondedDate: null,
             rescheduleResponseNote: null,

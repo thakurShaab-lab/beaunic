@@ -14,6 +14,8 @@ const { buildSalonLocation, rupees, withImageUrls, durationInfo } = require('./s
 const { photoUrl: employeePhotoUrl, initialsOf } = require('./employee.controller')
 const employeeModel = require('../models/employee.model')
 const cancelReasonModel = require('../models/cancel-reason.model')
+const slotModel = require('../models/slot.model')
+const { buildInvoicePdf } = require('../utils/invoicePdf')
 const { convertNulls } = require('../utils/convertNulls')
 
 const SLOT_NOT_AVAILABLE = 'Selected slot is not available.'
@@ -135,6 +137,12 @@ const rescheduleBookingSchema = z.object({
     ...deviceFields,
     bookingId: bookingIdField,
     slotId: z.coerce.number({ error: 'New slot ID is required' }).int().positive('New slot ID is required'),
+    // Optional message for the salon, e.g. "My office meeting moved to the morning"; saved in wl_bookings.reschedule_reason
+    rescheduleReason: z.string()
+        .trim()
+        .max(500, 'Reschedule reason can be up to 500 characters')
+        .refine(noMarkup, 'Invalid characters')
+        .optional(),
 }).strict()
 
 // Why a booking can't be cancelled or moved
@@ -923,6 +931,7 @@ const rescheduleOf = (booking) => {
             ? scheduleOf(booking.previousSlotId, booking.previousSlotDate, booking.previousStartTime, booking.previousEndTime)
             : scheduleOf(booking.slotId, booking.slotDate, booking.startTime, booking.endTime),
         requestedSchedule: scheduleOf(booking.requestedSlotId, booking.requestedSlotDate, booking.requestedStartTime, booking.requestedEndTime),
+        reason: booking.rescheduleReason,
         requestedDate: booking.rescheduleRequestedDate,
         requestedDateLabel: booking.rescheduleRequestedDate ? salonDateTimeLabel(booking.rescheduleRequestedDate) : null,
         respondedDate: booking.rescheduleRespondedDate,
@@ -1113,6 +1122,7 @@ const rescheduleBooking = async (req, res) => {
             bookingId: parsed.data.bookingId,
             customerId: customer.customerId,
             newSlotId: parsed.data.slotId,
+            rescheduleReason: parsed.data.rescheduleReason,
             checkBooking: (booking) => bookingChangeError(booking, 'reschedule'),
             checkSlot: (slot) => (hasStarted(slot) ? 'started' : null),
             now: authModel.nowString(),
@@ -1140,6 +1150,7 @@ const rescheduleBooking = async (req, res) => {
                 // The booking's slot stays until the salon approves
                 currentSchedule: reschedule.currentSchedule,
                 requestedSchedule: reschedule.requestedSchedule,
+                rescheduleReason: booking.rescheduleReason,
                 requestedDate: booking.rescheduleRequestedDate,
             }),
         })
@@ -1462,7 +1473,7 @@ const formatRequest = (row) => {
         responseNote: request.responseNote,
         ...(row.requestType === 'cancel'
             ? { cancelReasonLabel: request.cancelReasonLabel, cancelReasonNote: request.cancelReasonNote, refund: request.refund }
-            : { currentSchedule: request.currentSchedule, requestedSchedule: request.requestedSchedule }),
+            : { currentSchedule: request.currentSchedule, requestedSchedule: request.requestedSchedule, reason: request.reason }),
         canApprove: request.status === 'pending',
         canReject: request.status === 'pending',
     }
@@ -2341,11 +2352,361 @@ const updateSalonBookingStatus = async (req, res) => {
     }
 }
 
+// ----- Salon Partner: "Reschedule Request" screen -----
+
+// Can the requested slot still take this booking?
+//   unavailable: the slot was deleted; inactive: switched off; started: its time has passed;
+//   full: no places left; available: Approve will work
+const REQUESTED_SLOT_STATUS = {
+    available: { label: 'Available', message: null },
+    full: { label: 'Full', message: 'This slot is full. Increase its bookings to approve, or reject the request.' },
+    inactive: { label: 'Inactive', message: 'This slot is switched off. Activate it to approve, or reject the request.' },
+    started: { label: 'Started', message: 'This slot has already started. Please reject this request.' },
+    unavailable: { label: 'Unavailable', message: 'This slot no longer exists. Please reject this request.' },
+}
+
+const requestedSlotStatusOf = (slot) => {
+    if (!slot) return 'unavailable'
+    if (hasStarted(slot)) return 'started'
+    if (slot.status !== '1') return 'inactive'
+    if (slot.bookedCount >= slot.maxBookings) return 'full'
+    return 'available'
+}
+
+// One side of the Original / Requested cards: "07 Oct 2026" / "11:30 AM – 12:30 PM"
+const scheduleCard = (title, schedule) =>
+    schedule && {
+        title,
+        slotId: schedule.slotId,
+        slotDate: schedule.slotDate,
+        dateLabel: shortDate(schedule.slotDate),
+        startTime: schedule.startTime,
+        endTime: schedule.endTime,
+        timeLabel: schedule.timeLabel,
+    }
+
+// "Reschedule Request" (Salon Partner): one of the salon's bookings with its reschedule request: Original vs
+// Requested, the requested slot's places, the customer and their message, and whether Approve / Reject apply.
+// Approve / Reject: /booking/requests/respond with requestType "reschedule".
+const getRescheduleRequestDetails = async (req, res) => {
+    if (!(await validateRequestDevice(req, res))) return
+
+    const parsed = partnerBookingSchema.safeParse(req.body)
+
+    if (!parsed.success) return sendValidationError(res, parsed.error)
+
+    try {
+        const partner = await findSalonPartner(req, res, parsed.data)
+        if (!partner) return
+
+        // Only the partner's own salon's bookings
+        const booking = await bookingModel.findSalonBooking(partner.customerId, parsed.data.bookingId)
+        if (!booking) return res.status(200).json({ success: false, message: 'Booking not found.' })
+
+        const request = rescheduleOf(booking)
+        if (!request) return res.status(200).json({ success: false, message: 'There is no reschedule request on this booking.' })
+
+        const isPending = request.status === 'pending'
+        // The requested slot as it is now (a deleted slot counts as gone)
+        const slot = booking.requestedSlotId ? await slotModel.findCustomerSlot(partner.customerId, booking.requestedSlotId) : null
+        const slotStatus = requestedSlotStatusOf(slot)
+        const spotsLeft = slot ? Math.max(slot.maxBookings - slot.bookedCount, 0) : 0
+        const customerName = [booking.firstName, booking.lastName].filter(Boolean).join(' ').trim() || null
+        const requested = request.requestedSchedule
+
+        // While pending, a full or inactive slot can be edited (more bookings / switched on) so Approve works.
+        // Approve always uses the requested slot itself, so a new slot at the same time wouldn't help.
+        const slotAction = isPending && ['full', 'inactive'].includes(slotStatus)
+            ? { type: 'edit', label: 'Edit slot', slotId: slot.slotId }
+            : null
+
+        return res.status(200).json({
+            success: true,
+            message: 'Reschedule request fetched successfully',
+            data: convertNulls({
+                title: 'Reschedule Request',
+                bookingId: booking.bookingId,
+                // "BK-24030"
+                bookingNumber: bookingNumber(booking.bookingId),
+                // The badge: Pending / Approved / Rejected
+                status: request.status,
+                statusLabel: request.requestStatusLabel,
+                original: scheduleCard('Original', request.currentSchedule),
+                requested: scheduleCard('Requested', requested),
+                // AVAILABLE SLOT INFORMATION: "1 of 3 booked · 2 spots left" and the badge
+                slotInfo: {
+                    title: 'Available slot information',
+                    slotId: slot ? slot.slotId : null,
+                    status: slotStatus,
+                    statusLabel: REQUESTED_SLOT_STATUS[slotStatus].label,
+                    isAvailable: slotStatus === 'available' ? 1 : 0,
+                    maxBookings: slot ? slot.maxBookings : 0,
+                    bookedCount: slot ? slot.bookedCount : 0,
+                    spotsLeft,
+                    summaryLabel: slot
+                        ? `${slot.bookedCount} of ${slot.maxBookings} booked · ${spotsLeft} spot${spotsLeft === 1 ? '' : 's'} left`
+                        : 'No slot at this time',
+                    message: isPending ? REQUESTED_SLOT_STATUS[slotStatus].message : null,
+                    // "Edit slot" (/slot/update), with the slot's date and times to prefill the form
+                    action: slotAction && {
+                        ...slotAction,
+                        slotDate: requested ? requested.slotDate : null,
+                        startTime: requested ? requested.startTime : null,
+                        endTime: requested ? requested.endTime : null,
+                    },
+                },
+                // CUSTOMER DETAILS
+                customer: {
+                    title: 'Customer details',
+                    customerId: booking.customerId,
+                    name: customerName,
+                    initials: nameInitials(customerName),
+                    mobileNumber: booking.mobileNumber,
+                    mobileNumberLabel: phoneLabel(booking.mobileNumber),
+                    serviceId: booking.serviceId,
+                    serviceName: booking.serviceName,
+                    // "+91 94150 22871 · Haircut & Styling"
+                    subtitle: [phoneLabel(booking.mobileNumber), booking.serviceName].filter(Boolean).join(' · ') || null,
+                    // The quoted message, if the customer wrote one
+                    message: booking.rescheduleReason,
+                },
+                requestedDate: request.requestedDate,
+                requestedDateLabel: request.requestedDateLabel,
+                respondedDate: request.respondedDate,
+                respondedDateLabel: request.respondedDateLabel,
+                responseNote: request.responseNote,
+                // The buttons
+                canApprove: isPending && slotStatus === 'available' ? 1 : 0,
+                canReject: isPending ? 1 : 0,
+                approveLabel: 'Approve',
+                rejectLabel: 'Reject',
+            }),
+        })
+    } catch (err) {
+        console.error('Reschedule request details error:', err)
+        return res.status(200).json({ success: false, message: 'Something went wrong' })
+    }
+}
+
+// ----- Salon Partner: "Cancellation Details" screen -----
+
+// "Update Request Status" buttons, in screen order
+const CANCEL_STATUS_OPTIONS = [
+    { key: 'pending', label: 'Pending' },
+    { key: 'approved', label: 'Approved', action: 'approve' },
+    { key: 'rejected', label: 'Rejected', action: 'reject' },
+]
+
+// "Cancellation Details" (Salon Partner): one of the salon's bookings with its cancellation request: the
+// customer's reason, the customer and booking card, and the status buttons.
+// Approved / Rejected: /booking/requests/respond with requestType "cancel" and the option's action.
+const getCancellationRequestDetails = async (req, res) => {
+    if (!(await validateRequestDevice(req, res))) return
+
+    const parsed = partnerBookingSchema.safeParse(req.body)
+
+    if (!parsed.success) return sendValidationError(res, parsed.error)
+
+    try {
+        await loadReasonTitles()
+        const partner = await findSalonPartner(req, res, parsed.data)
+        if (!partner) return
+
+        // Only the partner's own salon's bookings
+        const booking = await bookingModel.findSalonBooking(partner.customerId, parsed.data.bookingId)
+        if (!booking) return res.status(200).json({ success: false, message: 'Booking not found.' })
+
+        const request = cancellationOf(booking)
+        if (!request) return res.status(200).json({ success: false, message: 'There is no cancellation request on this booking.' })
+
+        const tab = tabOf(booking)
+        const isPending = booking.cancelStatus === 'pending'
+        const customerName = [booking.firstName, booking.lastName].filter(Boolean).join(' ').trim() || null
+        const reasonLabel = reasonLabelOf(booking.cancelReason)
+        const requestedDay = booking.cancelRequestedDate ? salonDateTimeLabel(booking.cancelRequestedDate).split(' · ')[0] : null
+        const paid = booking.paymentStatus === 'Paid'
+        const mode = paymentModeOf(booking)
+
+        return res.status(200).json({
+            success: true,
+            message: 'Cancellation details fetched successfully',
+            data: convertNulls({
+                title: 'Cancellation Details',
+                bookingId: booking.bookingId,
+                // "BK-24028"
+                bookingNumber: bookingNumber(booking.bookingId),
+                // The badge: Pending / Approved / Rejected
+                status: booking.cancelStatus,
+                statusLabel: REQUEST_STATUS_LABELS[booking.cancelStatus],
+                // CANCELLATION REQUEST: the quoted line is what the customer wrote, else the reason they picked
+                request: {
+                    title: 'Cancellation request',
+                    reason: booking.cancelReasonNote || reasonLabel,
+                    cancelReasonId: booking.cancelReasonId,
+                    cancelReason: booking.cancelReason,
+                    cancelReasonLabel: reasonLabel,
+                    cancelReasonNote: booking.cancelReasonNote,
+                    requestedDate: booking.cancelRequestedDate,
+                    // "Requested on 06 Oct 2026"
+                    requestedDateLabel: requestedDay ? `Requested on ${requestedDay}` : null,
+                    requestedDateTimeLabel: request.requestedDateLabel,
+                    respondedDate: booking.cancelRespondedDate,
+                    respondedDateLabel: request.respondedDateLabel,
+                    responseNote: booking.cancelResponseNote,
+                },
+                customer: {
+                    title: 'Customer',
+                    customerId: booking.customerId,
+                    name: customerName,
+                    initials: nameInitials(customerName),
+                    mobileNumber: booking.mobileNumber,
+                    mobileNumberLabel: phoneLabel(booking.mobileNumber),
+                    email: booking.email,
+                },
+                // The rows under the customer
+                booking: {
+                    serviceId: booking.serviceId,
+                    serviceName: booking.serviceName,
+                    bookingNumber: bookingNumber(booking.bookingId),
+                    bookingDate: booking.slotDate,
+                    dateLabel: shortDate(booking.slotDate),
+                    startTime: hhmm(booking.startTime),
+                    endTime: hhmm(booking.endTime),
+                    timeSlotLabel: `${timeLabel(booking.startTime)} – ${timeLabel(booking.endTime)}`,
+                    amount: Number(booking.totalAmount),
+                    amountLabel: rupees(booking.totalAmount),
+                    // "Paid · Online" / "Unpaid · Cash at salon"
+                    paymentStatus: booking.paymentStatus,
+                    paymentMode: mode,
+                    paymentLabel: paid ? `Paid · ${PAYMENT_MODE_LABELS[mode] || 'Online'}` : 'Unpaid · Cash at salon',
+                    // "Upcoming" badge: the booking itself (stays Upcoming until a cancellation is approved)
+                    bookingStatus: tab,
+                    bookingStatusLabel: TAB_LABELS[tab] || booking.orderStatus,
+                },
+                refund: request.refund,
+                // UPDATE REQUEST STATUS: the current one is selected; only a pending request can be changed
+                statusOptions: CANCEL_STATUS_OPTIONS.map((option) => ({
+                    key: option.key,
+                    label: option.label,
+                    // Send to /booking/requests/respond as "action" (none for Pending)
+                    action: option.action || null,
+                    isSelected: option.key === booking.cancelStatus ? 1 : 0,
+                    isEnabled: isPending && option.action ? 1 : 0,
+                })),
+                canApprove: isPending ? 1 : 0,
+                canReject: isPending ? 1 : 0,
+            }),
+        })
+    } catch (err) {
+        console.error('Cancellation request details error:', err)
+        return res.status(200).json({ success: false, message: 'Something went wrong' })
+    }
+}
+
+// ----- User: "Invoice" sheet and Download Invoice -----
+
+// Only what the Invoice sheet shows; the PDF shows the same. One of the customer's own bookings.
+const buildInvoice = (booking) => {
+    const customerName = [booking.firstName, booking.lastName].filter(Boolean).join(' ').trim() || null
+
+    return {
+        title: 'Invoice',
+        // "INV-BK-30418", the same number Booking Details shows
+        invoiceNumber: `INV-${bookingNumber(booking.bookingId)}`,
+        from: { label: 'From', name: booking.salonName },
+        billedTo: { label: 'Billed to', name: customerName },
+        service: {
+            name: booking.serviceName,
+            // "07 Oct 2026 · 11:30 AM – 12:00 PM"
+            scheduleLabel: `${shortDate(booking.slotDate)} · ${timeLabel(booking.startTime)} – ${timeLabel(booking.endTime)}`,
+            // The amount charged for the booking (after any coupon), so it matches the total
+            amountLabel: rupees(booking.totalAmount),
+        },
+        totalLabel: rupees(booking.totalAmount),
+        // "Payment · Paid · UPI" and the Paid / Unpaid badge
+        paymentLabel: `Payment · ${paymentLabel(booking)}`,
+        paymentStatusLabel: booking.paymentStatus === 'Paid' ? 'Paid' : 'Unpaid',
+    }
+}
+
+// The customer's own booking, or replies "Booking not found." and returns null
+const findInvoiceBooking = async (req, res, data) => {
+    const customer = await findUser(req, res, data)
+    if (!customer) return null
+
+    // Looked up by booking ID and the logged-in customer together, so other people's invoices are "not found"
+    const booking = await bookingModel.findCustomerBooking(customer.customerId, data.bookingId)
+    if (!booking) {
+        res.status(200).json({ success: false, message: 'Booking not found.' })
+        return null
+    }
+
+    return booking
+}
+
+// "Invoice" sheet: the invoice of one of the customer's bookings
+const getInvoice = async (req, res) => {
+    if (!(await validateRequestDevice(req, res))) return
+
+    const parsed = bookingDetailsSchema.safeParse(req.body)
+
+    if (!parsed.success) return sendValidationError(res, parsed.error)
+
+    try {
+        const booking = await findInvoiceBooking(req, res, parsed.data)
+        if (!booking) return
+
+        const invoice = buildInvoice(booking)
+
+        return res.status(200).json({
+            success: true,
+            message: 'Invoice fetched successfully',
+            data: convertNulls({ ...invoice, downloadLabel: 'Download Invoice' }),
+        })
+    } catch (err) {
+        console.error('Invoice error:', err)
+        return res.status(200).json({ success: false, message: 'Something went wrong' })
+    }
+}
+
+// "Download Invoice": the same invoice as a PDF file (Content-Type application/pdf). Errors are JSON as usual.
+const downloadInvoice = async (req, res) => {
+    if (!(await validateRequestDevice(req, res))) return
+
+    const parsed = bookingDetailsSchema.safeParse(req.body)
+
+    if (!parsed.success) return sendValidationError(res, parsed.error)
+
+    try {
+        const booking = await findInvoiceBooking(req, res, parsed.data)
+        if (!booking) return
+
+        const invoice = buildInvoice(booking)
+        const pdf = await buildInvoicePdf(invoice)
+
+        res.status(200)
+        res.set({
+            'Content-Type': 'application/pdf',
+            'Content-Disposition': `attachment; filename="${invoice.invoiceNumber}.pdf"`,
+            'Content-Length': pdf.length,
+            'Cache-Control': 'no-store',
+        })
+        return res.end(pdf)
+    } catch (err) {
+        console.error('Download invoice error:', err)
+        return res.status(200).json({ success: false, message: 'Something went wrong' })
+    }
+}
+
 module.exports = {
     getBookingSuccess,
     getPaymentMethods,
     payForBooking,
     listCancellationRequests,
+    getRescheduleRequestDetails,
+    getCancellationRequestDetails,
+    getInvoice,
+    downloadInvoice,
     getSalonBookingDetails,
     updateSalonBookingStatus,
     createBooking,
