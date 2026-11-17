@@ -1,5 +1,5 @@
 const express = require('express')
-const { createBooking, getBookingSummary, getPaymentMethods, payForBooking, getBookingSuccess, cancelBooking, rescheduleBooking, listBookings, getBookingDetails, listBookingRequests, respondBookingRequest, recordBookingPayment, listSalonBookings, getSalonBookingDetails, updateSalonBookingStatus, listCancellationRequests } = require('../controllers/booking.controller')
+const { createBooking, getBookingSummary, getPaymentMethods, payForBooking, getBookingSuccess, getCancelOptions, cancelBooking, rescheduleBooking, listBookings, getBookingDetails, listBookingRequests, respondBookingRequest, recordBookingPayment, listSalonBookings, getSalonBookingDetails, updateSalonBookingStatus, listCancellationRequests } = require('../controllers/booking.controller')
 const { jwtAuthMiddleware, deviceAuthMiddleware } = require('../middleware/auth.middleware')
 const { parsePayload } = require('../middleware/payload.middleware')
 
@@ -12,6 +12,8 @@ router.post('/payment-methods', jwtAuthMiddleware, parsePayload(), deviceAuthMid
 router.post('/pay', jwtAuthMiddleware, parsePayload(), deviceAuthMiddleware, payForBooking)
 // 'Booking Successful' screen after payment
 router.post('/success', jwtAuthMiddleware, parsePayload(), deviceAuthMiddleware, getBookingSuccess)
+// The Cancel Booking screen: booking card, reasons, policy, refund methods
+router.post('/cancel-options', jwtAuthMiddleware, parsePayload(), deviceAuthMiddleware, getCancelOptions)
 router.post('/cancel', jwtAuthMiddleware, parsePayload(), deviceAuthMiddleware, cancelBooking)
 router.post('/reschedule', jwtAuthMiddleware, parsePayload(), deviceAuthMiddleware, rescheduleBooking)
 router.post('/create', jwtAuthMiddleware, parsePayload(), deviceAuthMiddleware, createBooking)
@@ -20,7 +22,7 @@ router.post('/details', jwtAuthMiddleware, parsePayload(), deviceAuthMiddleware,
 
 // Salon Partners (customer_type 1)
 router.post('/requests', jwtAuthMiddleware, parsePayload(), deviceAuthMiddleware, listBookingRequests)
-router.post('/request/respond', jwtAuthMiddleware, parsePayload(), deviceAuthMiddleware, respondBookingRequest)
+router.post('/requests/respond', jwtAuthMiddleware, parsePayload(), deviceAuthMiddleware, respondBookingRequest)
 router.post('/payment', jwtAuthMiddleware, parsePayload(), deviceAuthMiddleware, recordBookingPayment)
 router.post('/partner/list', jwtAuthMiddleware, parsePayload(), deviceAuthMiddleware, listSalonBookings)
 router.post('/partner/details', jwtAuthMiddleware, parsePayload(), deviceAuthMiddleware, getSalonBookingDetails)

@@ -183,7 +183,7 @@ const pendingRequestError = (booking) => {
 
 // Customer: asks to cancel. The booking stays as it is until the partner approves.
 //   checkBooking(booking): an error code when it can't be cancelled, or null
-//   cancellation(booking): { cancelReason, cancelReasonNote, refundMethod }
+//   cancellation(booking): { cancelReasonId, cancelReason, cancelReasonNote, refundMethod }
 // Returns { error } or { booking } (with the request saved)
 const requestCancellation = async ({ bookingId, customerId, checkBooking, cancellation, now }) =>
     db.transaction(async (tx) => {

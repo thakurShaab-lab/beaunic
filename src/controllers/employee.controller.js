@@ -13,6 +13,7 @@ const { detectImageExt } = require('./auth.controller')
 const { noMarkup } = require('./address.controller')
 const { convertNulls } = require('../utils/convertNulls')
 const { resolveMediaUrl } = require('../utils/mediaUrl')
+const { noImageUrl } = require('../utils/shareUrl')
 
 // Photos are saved in uploaded_files/employee (the folder served at /uploaded_files)
 const EMPLOYEE_IMAGE_FOLDER = 'employee'
@@ -127,7 +128,8 @@ const writePhoto = async (photo) => {
 
 const deletePhoto = (name) => (name ? fs.unlink(path.join(EMPLOYEE_IMAGE_DIR, name)).catch(() => { }) : Promise.resolve())
 
-const photoUrl = (req, name) => resolveMediaUrl(req, EMPLOYEE_IMAGE_FOLDER, name, null, env.staticFileBaseUrl)
+// The employee's photo, or the "no image" placeholder when there is none or the file is missing on the server
+const photoUrl = (req, name) => resolveMediaUrl(req, EMPLOYEE_IMAGE_FOLDER, name, noImageUrl(), env.staticFileBaseUrl)
 
 // "Neha Verma" -> "NV"
 const initialsOf = (name) => String(name || '').split(/\s+/).filter(Boolean).slice(0, 2).map((word) => word[0]).join('').toUpperCase() || null

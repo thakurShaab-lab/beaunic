@@ -13,6 +13,7 @@ const { salonNow, timeLabel, dateParts, hhmm, formatSlot } = require('./slot.con
 const { buildSalonLocation, rupees, withImageUrls, durationInfo } = require('./service.controller')
 const { photoUrl: employeePhotoUrl, initialsOf } = require('./employee.controller')
 const employeeModel = require('../models/employee.model')
+const cancelReasonModel = require('../models/cancel-reason.model')
 const { convertNulls } = require('../utils/convertNulls')
 
 const SLOT_NOT_AVAILABLE = 'Selected slot is not available.'
@@ -62,15 +63,30 @@ const bookingSummarySchema = z.object({
 
 const bookingIdField = z.coerce.number({ error: 'Booking ID is required' }).int().positive('Booking ID is required')
 
-// "Reason for cancellation" options, in screen order
-const CANCEL_REASONS = {
-    change_of_plans: 'Change of plans',
-    booked_by_mistake: 'Booked by mistake',
-    better_time_slot: 'Found a better time slot',
-    health_reasons: 'Health reasons',
-    salon_too_far: 'Salon is too far',
-    other: 'Other',
+// "Reason for cancellation" options live in wl_cancel_reasons. Bookings keep the reason's key (cancel_reason),
+// and its title is looked up here; the titles are cached for a few minutes as they rarely change.
+const REASON_CACHE_MS = 5 * 60 * 1000
+let reasonTitles = new Map()
+let reasonTitlesLoadedAt = 0
+
+// Call before showing bookings with a cancellation, so cancelReasonLabel has the current titles
+const loadReasonTitles = async () => {
+    if (Date.now() - reasonTitlesLoadedAt < REASON_CACHE_MS) return
+    const rows = await cancelReasonModel.findAllReasons()
+    reasonTitles = new Map(rows.map((row) => [row.reasonKey, row.reasonTitle]))
+    reasonTitlesLoadedAt = Date.now()
 }
+
+const reasonLabelOf = (reasonKey) => (reasonKey ? reasonTitles.get(reasonKey) || null : null)
+
+// One option on the Cancel Booking screen
+const formatReason = (reason) => ({
+    reasonId: reason.reasonId,
+    reasonKey: reason.reasonKey,
+    title: reason.reasonTitle,
+    // "Other": the app shows a text box and cancelReasonNote is required
+    requiresNote: reason.requiresNote === '1' ? 1 : 0,
+})
 
 // "Refund method (if eligible)"
 const REFUND_METHODS = {
@@ -80,7 +96,7 @@ const REFUND_METHODS = {
 
 const CANCELLATION_POLICY = 'Cancellation and refund eligibility are set by the salon. The salon reviews your request, and the outcome appears in Notifications.'
 
-// "Change of plans", "change_of_plans" and "Change Of Plans" are the same; so are "Original payment method" and "original"
+// "Original payment method", "original" and "Original Payment Method" are the same
 const matchOption = (options) => (value) => {
     if (typeof value !== 'string') return value
     const wanted = value.trim().toLowerCase().replace(/[^a-z0-9]/g, '')
@@ -93,15 +109,9 @@ const matchOption = (options) => (value) => {
 const cancelBookingSchema = z.object({
     ...deviceFields,
     bookingId: bookingIdField,
-    cancelReason: z.preprocess(
-        matchOption(CANCEL_REASONS),
-        z.enum(Object.keys(CANCEL_REASONS), {
-            error: (issue) => (issue.input === undefined
-                ? 'Please select a reason for cancellation'
-                : `Reason must be one of: ${Object.values(CANCEL_REASONS).join(', ')}`),
-        })
-    ),
-    // Required when the reason is "Other"
+    // reasonId from /booking/cancel-options (wl_cancel_reasons)
+    cancelReasonId: z.coerce.number({ error: 'Please select a reason for cancellation' }).int('Please select a valid reason for cancellation').positive('Please select a valid reason for cancellation'),
+    // Required when the reason needs a note ("Other")
     cancelReasonNote: z.string()
         .trim()
         .max(500, 'Reason can be up to 500 characters')
@@ -112,11 +122,13 @@ const cancelBookingSchema = z.object({
         matchOption(REFUND_METHODS),
         z.enum(Object.keys(REFUND_METHODS), { error: 'Refund method must be original or wallet' }).optional()
     ),
-}).strict().superRefine((d, ctx) => {
-    if (d.cancelReason === 'other' && !d.cancelReasonNote) {
-        ctx.addIssue({ code: 'custom', path: ['cancelReasonNote'], message: 'Please tell us why you are cancelling' })
-    }
-})
+}).strict()
+
+// The Cancel Booking screen for one of the customer's bookings
+const cancelOptionsSchema = z.object({
+    ...deviceFields,
+    bookingId: bookingIdField,
+}).strict()
 
 // The new date and time are one of the salon's slots (from /slot/list with the booking's salonId)
 const rescheduleBookingSchema = z.object({
@@ -875,7 +887,8 @@ const cancellationOf = (booking) => {
         isCancelled: booking.cancelStatus === 'approved',
         isCancel: booking.isCancel,
         cancelReason: booking.cancelReason,
-        cancelReasonLabel: CANCEL_REASONS[booking.cancelReason] || null,
+        cancelReasonId: booking.cancelReasonId,
+        cancelReasonLabel: reasonLabelOf(booking.cancelReason),
         cancelReasonNote: booking.cancelReasonNote,
         requestedDate: booking.cancelRequestedDate,
         requestedDateLabel: booking.cancelRequestedDate ? salonDateTimeLabel(booking.cancelRequestedDate) : null,
@@ -925,6 +938,81 @@ const pendingRequestOf = (booking) => {
     return null
 }
 
+// "Cancel Booking" screen: the booking card, the reasons (wl_cancel_reasons), the policy and the refund methods.
+// Only for a booking the customer can still cancel; otherwise the same message /booking/cancel would give.
+const getCancelOptions = async (req, res) => {
+    if (!(await validateRequestDevice(req, res))) return
+
+    const parsed = cancelOptionsSchema.safeParse(req.body)
+
+    if (!parsed.success) return sendValidationError(res, parsed.error)
+
+    try {
+        const customer = await findUser(req, res, parsed.data)
+        if (!customer) return
+
+        const booking = await bookingModel.findCustomerBooking(customer.customerId, parsed.data.bookingId)
+        if (!booking) return sendChangeError(res, 'not_found')
+
+        const changeError = bookingChangeError(booking, 'cancel')
+            || (booking.cancelStatus === 'pending' && 'cancel_pending')
+            || (booking.rescheduleStatus === 'pending' && 'reschedule_pending')
+        if (changeError) return sendChangeError(res, changeError)
+
+        const [reasons, covers] = await Promise.all([
+            cancelReasonModel.findActiveReasons(),
+            coverImages(req, [booking.serviceId]),
+        ])
+        const basics = bookingBasics(booking, tabOf(booking))
+        // Refunds only apply to a paid booking; the app hides the section otherwise
+        const isPaid = booking.paymentStatus === 'Paid'
+
+        return res.status(200).json({
+            success: true,
+            message: 'Cancel booking details fetched successfully',
+            data: convertNulls({
+                title: 'Cancel Booking',
+                // The card at the top: "Gold Radiance Facial", "Beaunic Salon Academy", "07 Oct 2026 · 12:00 AM · ₹1,299"
+                booking: {
+                    bookingId: basics.bookingId,
+                    bookingNumber: basics.bookingNumber,
+                    serviceId: basics.serviceId,
+                    serviceName: basics.serviceName,
+                    imageUrl: covers.get(booking.serviceId) || null,
+                    salonId: basics.salonId,
+                    salonName: basics.salonName,
+                    bookingDate: basics.bookingDate,
+                    bookingDateLabel: basics.bookingDateLabel,
+                    startTime: basics.startTime,
+                    timeLabel: basics.timeLabel,
+                    amount: basics.amount,
+                    amountLabel: basics.amountLabel,
+                    paymentStatus: basics.paymentStatus,
+                    scheduleLabel: [basics.bookingDateLabel, basics.timeLabel, basics.amountLabel].filter(Boolean).join(' · '),
+                },
+                reasonTitle: 'Reason for cancellation',
+                // Send the chosen reasonId to /booking/cancel as cancelReasonId
+                reasons: reasons.map(formatReason),
+                cancellationPolicy: { title: 'Cancellation policy', description: CANCELLATION_POLICY },
+                refund: {
+                    title: 'Refund method (if eligible)',
+                    isEligible: isPaid ? 1 : 0,
+                    // Send the chosen key to /booking/cancel as refundMethod; original is selected by default
+                    methods: Object.entries(REFUND_METHODS).map(([key, method]) => ({
+                        key,
+                        label: method.label,
+                        description: method.description,
+                        isSelected: key === 'original' ? 1 : 0,
+                    })),
+                },
+            }),
+        })
+    } catch (err) {
+        console.error('Cancel options error:', err)
+        return res.status(200).json({ success: false, message: 'Something went wrong' })
+    }
+}
+
 // "Cancel Booking": the customer asks the salon to cancel their upcoming booking, with a reason and (for paid
 // bookings) a refund method. Nothing changes on the booking until the salon approves.
 const cancelBooking = async (req, res) => {
@@ -940,13 +1028,24 @@ const cancelBooking = async (req, res) => {
         const customer = await findUser(req, res, d)
         if (!customer) return
 
+        // Only a reason that is active in wl_cancel_reasons can be picked
+        const reason = await cancelReasonModel.findActiveReason(d.cancelReasonId)
+        if (!reason) {
+            return res.status(200).json({ success: false, message: 'Please select a valid reason for cancellation', field: 'cancelReasonId' })
+        }
+        if (reason.requiresNote === '1' && !d.cancelReasonNote) {
+            return res.status(200).json({ success: false, message: 'Please tell us why you are cancelling', field: 'cancelReasonNote' })
+        }
+
         const result = await bookingModel.requestCancellation({
             bookingId: d.bookingId,
             customerId: customer.customerId,
             checkBooking: (booking) => bookingChangeError(booking, 'cancel'),
             cancellation: (booking) => ({
-                cancelReason: d.cancelReason,
-                // The note is kept for "Other"; for the fixed reasons it's optional extra detail
+                cancelReasonId: reason.reasonId,
+                // The key too, so the reason still shows if the row is later renamed or removed
+                cancelReason: reason.reasonKey,
+                // Required for "Other"; for the other reasons it's optional extra detail
                 cancelReasonNote: d.cancelReasonNote || null,
                 // Nothing to refund on an unpaid booking
                 refundMethod: booking.paymentStatus === 'Paid' ? d.refundMethod ?? 'original' : null,
@@ -956,6 +1055,7 @@ const cancelBooking = async (req, res) => {
 
         if (result.error) return sendChangeError(res, result.error)
 
+        await loadReasonTitles()
         const booking = result.booking
         const cancellation = cancellationOf(booking)
 
@@ -979,8 +1079,9 @@ const cancelBooking = async (req, res) => {
                 timeLabel: `${timeLabel(booking.startTime)} – ${timeLabel(booking.endTime)}`,
                 amount: Number(booking.totalAmount),
                 amountLabel: rupees(booking.totalAmount),
-                cancelReason: booking.cancelReason,
-                cancelReasonLabel: CANCEL_REASONS[booking.cancelReason],
+                cancelReasonId: reason.reasonId,
+                cancelReason: reason.reasonKey,
+                cancelReasonLabel: reason.reasonTitle,
                 cancelReasonNote: booking.cancelReasonNote,
                 requestStatus: booking.cancelStatus,
                 requestStatusLabel: cancellation.statusLabel,
@@ -1380,6 +1481,7 @@ const listBookingRequests = async (req, res) => {
     const limit = parsed.data.limit ?? MAX_PAGE_SIZE
 
     try {
+        await loadReasonTitles()
         const partner = await findSalonPartner(req, res, parsed.data)
         if (!partner) return
 
@@ -1426,7 +1528,7 @@ const cancellationRequestsSchema = z.object({
 const formatCancellationCard = (row) => {
     const request = cancellationOf(row)
     const customerName = [row.firstName, row.lastName].filter(Boolean).join(' ').trim() || null
-    const reasonLabel = CANCEL_REASONS[row.cancelReason] || null
+    const reasonLabel = reasonLabelOf(row.cancelReason)
     const requestedDay = row.cancelRequestedDate ? salonDateTimeLabel(row.cancelRequestedDate).split(' · ')[0] : null
 
     return {
@@ -1453,6 +1555,7 @@ const formatCancellationCard = (row) => {
         timeSlotLabel: `${timeLabel(row.startTime)} – ${timeLabel(row.endTime)}`,
         // The quoted line: what the customer wrote, else the reason they picked
         reason: row.cancelReasonNote || reasonLabel,
+        cancelReasonId: row.cancelReasonId,
         cancelReason: row.cancelReason,
         cancelReasonLabel: reasonLabel,
         cancelReasonNote: row.cancelReasonNote,
@@ -1485,6 +1588,7 @@ const listCancellationRequests = async (req, res) => {
     const limit = parsed.data.limit ?? DEFAULT_PAGE_SIZE
 
     try {
+        await loadReasonTitles()
         const partner = await findSalonPartner(req, res, parsed.data)
         if (!partner) return
 
@@ -1532,6 +1636,7 @@ const respondBookingRequest = async (req, res) => {
     const d = parsed.data
 
     try {
+        await loadReasonTitles()
         const partner = await findSalonPartner(req, res, d)
         if (!partner) return
 
@@ -1685,6 +1790,7 @@ const getBookingDetails = async (req, res) => {
     if (!parsed.success) return sendValidationError(res, parsed.error)
 
     try {
+        await loadReasonTitles()
         const customer = await findUser(req, res, parsed.data)
         if (!customer) return
 
@@ -2045,6 +2151,7 @@ const getSalonBookingDetails = async (req, res) => {
     if (!parsed.success) return sendValidationError(res, parsed.error)
 
     try {
+        await loadReasonTitles()
         const partner = await findSalonPartner(req, res, parsed.data)
         if (!partner) return
 
@@ -2243,6 +2350,7 @@ module.exports = {
     updateSalonBookingStatus,
     createBooking,
     getBookingSummary,
+    getCancelOptions,
     cancelBooking,
     rescheduleBooking,
     listBookings,
