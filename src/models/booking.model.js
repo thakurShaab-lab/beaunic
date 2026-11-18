@@ -8,6 +8,7 @@ const { wlServices } = require("../schema/wl-services")
 const { wlDurations } = require("../schema/wl-durations")
 const { wlEmployees } = require("../schema/wl-employees")
 const { wlWalletTransactions } = require("../schema/wl-wallet-transactions")
+const { createBookingRefund } = require("./refund.model")
 
 // Books one place in a slot, or reports why it can't. One transaction with the slot row locked,
 // so two people can't both take the last place.
@@ -278,6 +279,8 @@ const respondToRequest = async ({ bookingId, salonId, requestType, action, note,
             const values = { ...decision, orderStatus: "Cancelled", isCancel: "1", bookingCancelledDate: now, cancelledBy: "customer" }
             await tx.update(wlBookings).set(values).where(eq(wlBookings.bookingId, bookingId))
             await releaseSlotPlace(tx, booking.slotId)
+            // A paid booking now owes the customer a refund (the Refunds screen)
+            await createBookingRefund(tx, booking, now)
             return { booking: { ...booking, ...values } }
         }
 
@@ -629,7 +632,11 @@ const updateBookingStatus = async ({ bookingId, salonId, status, now }) =>
             : { orderStatus: "Cancelled", isCancel: "1", bookingCancelledDate: now, cancelledBy: "salon", bookingUpdatedDate: now }
 
         await tx.update(wlBookings).set(values).where(eq(wlBookings.bookingId, bookingId))
-        if (status === "cancelled") await releaseSlotPlace(tx, booking.slotId)
+        if (status === "cancelled") {
+            await releaseSlotPlace(tx, booking.slotId)
+            // A paid booking now owes the customer a refund (the Refunds screen)
+            await createBookingRefund(tx, booking, now)
+        }
 
         return { booking: { ...booking, ...values } }
     })

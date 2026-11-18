@@ -863,7 +863,8 @@ const bookingChangeError = (booking, action) => {
     return null
 }
 
-const sendChangeError = (res, code) => res.status(200).json({ success: false, message: CHANGE_ERRORS[code] })
+// extra: more keys for the app, e.g. { canCancel: false }
+const sendChangeError = (res, code, extra = {}) => res.status(200).json({ success: false, message: CHANGE_ERRORS[code], ...extra })
 
 // Request status as shown on the cards: Pending / Approved / Rejected
 const REQUEST_STATUS_LABELS = { pending: 'Pending', approved: 'Approved', rejected: 'Rejected' }
@@ -1062,7 +1063,8 @@ const cancelBooking = async (req, res) => {
             now: authModel.nowString(),
         })
 
-        if (result.error) return sendChangeError(res, result.error)
+        // "Already started": canCancel false, so the app can hide the Cancel option
+        if (result.error) return sendChangeError(res, result.error, result.error === 'started_cancel' ? { canCancel: false } : {})
 
         await loadReasonTitles()
         const booking = result.booking
@@ -1128,7 +1130,8 @@ const rescheduleBooking = async (req, res) => {
             now: authModel.nowString(),
         })
 
-        if (result.error) return sendChangeError(res, result.error)
+        // "Already started": canReschedule false, so the app can hide the Reschedule option
+        if (result.error) return sendChangeError(res, result.error, result.error === 'started_reschedule' ? { canReschedule: false } : {})
 
         const { booking } = result
         const reschedule = rescheduleOf(booking)
