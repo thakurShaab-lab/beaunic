@@ -16,6 +16,10 @@ const employeeModel = require('../models/employee.model')
 const cancelReasonModel = require('../models/cancel-reason.model')
 const slotModel = require('../models/slot.model')
 const { buildInvoicePdf } = require('../utils/invoicePdf')
+const fs = require('fs/promises')
+const path = require('path')
+const crypto = require('crypto')
+const env = require('../config/env')
 const { convertNulls } = require('../utils/convertNulls')
 
 const SLOT_NOT_AVAILABLE = 'Selected slot is not available.'
@@ -1357,7 +1361,8 @@ const buildTimeline = (booking, tab) => {
 
 // Booking Details extras when the customer asked to cancel or reschedule: the request blocks, the badge while
 // it waits, and the Invoice row for cancellations. Nothing is added for bookings without a request.
-const requestDetails = (booking, tab) => {
+//   invoiceUrl: the direct link to the invoice PDF (saveInvoicePdf)
+const requestDetails = (booking, tab, invoiceUrl) => {
     const cancellation = cancellationOf(booking)
     const reschedule = rescheduleOf(booking)
     const pendingRequest = pendingRequestOf(booking)
@@ -1367,7 +1372,7 @@ const requestDetails = (booking, tab) => {
         ...(cancellation && {
             cancellation,
             // "Invoice · INV-BK-30418"
-            invoice: { invoiceNumber: `INV-${bookingNumber(booking.bookingId)}`, label: 'Invoice' },
+            invoice: { invoiceNumber: `INV-${bookingNumber(booking.bookingId)}`, label: 'Invoice', downloadUrl: invoiceUrl || null },
         }),
         ...(reschedule && { reschedule }),
     }
@@ -1813,10 +1818,12 @@ const getBookingDetails = async (req, res) => {
         if (!booking) return res.status(200).json({ success: false, message: 'Booking not found.' })
 
         const tab = tabOf(booking)
-        const [address, covers, employeeImageUrl] = await Promise.all([
+        const [address, covers, employeeImageUrl, invoiceUrl] = await Promise.all([
             addressModel.findDefaultAddress(booking.salonId),
             coverImages(req, [booking.serviceId]),
             booking.employeeId ? employeePhotoUrl(req, booking.employeeImage) : null,
+            // The Invoice row is only shown for cancellations, so the PDF is only made for them
+            cancellationOf(booking) ? saveInvoicePdf(buildInvoice(booking), booking.bookingId) : null,
         ])
         const basics = bookingBasics(booking, tab)
         const employee = assignedEmployeeOf(booking, employeeImageUrl)
@@ -1868,7 +1875,7 @@ const getBookingDetails = async (req, res) => {
                 notes: booking.bookingNotes,
                 bookedOn: booking.orderReceivedDate,
                 // Only for a cancelled booking; everything above stays as it is otherwise
-                ...requestDetails(booking, tab),
+                ...requestDetails(booking, tab, invoiceUrl),
             }),
         })
     } catch (err) {
@@ -2606,9 +2613,9 @@ const getCancellationRequestDetails = async (req, res) => {
     }
 }
 
-// ----- User: "Invoice" sheet and Download Invoice -----
+// ----- User: the invoice PDF linked from Booking Details -----
 
-// Only what the Invoice sheet shows; the PDF shows the same. One of the customer's own bookings.
+// What the invoice PDF shows (the Invoice link in Booking Details). One of the customer's own bookings.
 const buildInvoice = (booking) => {
     const customerName = [booking.firstName, booking.lastName].filter(Boolean).join(' ').trim() || null
 
@@ -2632,73 +2639,22 @@ const buildInvoice = (booking) => {
     }
 }
 
-// The customer's own booking, or replies "Booking not found." and returns null
-const findInvoiceBooking = async (req, res, data) => {
-    const customer = await findUser(req, res, data)
-    if (!customer) return null
+// Invoice PDFs are saved in uploaded_files/invoices. The file name carries a hash only the server can make,
+// so the link can be opened without logging in but other bookings' invoices can't be guessed.
+const INVOICE_FOLDER = 'invoices'
+const INVOICE_DIR = path.join(env.uploadDir, INVOICE_FOLDER)
 
-    // Looked up by booking ID and the logged-in customer together, so other people's invoices are "not found"
-    const booking = await bookingModel.findCustomerBooking(customer.customerId, data.bookingId)
-    if (!booking) {
-        res.status(200).json({ success: false, message: 'Booking not found.' })
-        return null
-    }
-
-    return booking
+const invoiceFileName = (invoice, bookingId) => {
+    const hash = crypto.createHmac('sha256', process.env.JWT_SECRET).update(`invoice:${bookingId}`).digest('hex').slice(0, 24)
+    return `${invoice.invoiceNumber}-${hash}.pdf`
 }
 
-// "Invoice" sheet: the invoice of one of the customer's bookings
-const getInvoice = async (req, res) => {
-    if (!(await validateRequestDevice(req, res))) return
-
-    const parsed = bookingDetailsSchema.safeParse(req.body)
-
-    if (!parsed.success) return sendValidationError(res, parsed.error)
-
-    try {
-        const booking = await findInvoiceBooking(req, res, parsed.data)
-        if (!booking) return
-
-        const invoice = buildInvoice(booking)
-
-        return res.status(200).json({
-            success: true,
-            message: 'Invoice fetched successfully',
-            data: convertNulls({ ...invoice, downloadLabel: 'Download Invoice' }),
-        })
-    } catch (err) {
-        console.error('Invoice error:', err)
-        return res.status(200).json({ success: false, message: 'Something went wrong' })
-    }
-}
-
-// "Download Invoice": the same invoice as a PDF file (Content-Type application/pdf). Errors are JSON as usual.
-const downloadInvoice = async (req, res) => {
-    if (!(await validateRequestDevice(req, res))) return
-
-    const parsed = bookingDetailsSchema.safeParse(req.body)
-
-    if (!parsed.success) return sendValidationError(res, parsed.error)
-
-    try {
-        const booking = await findInvoiceBooking(req, res, parsed.data)
-        if (!booking) return
-
-        const invoice = buildInvoice(booking)
-        const pdf = await buildInvoicePdf(invoice)
-
-        res.status(200)
-        res.set({
-            'Content-Type': 'application/pdf',
-            'Content-Disposition': `attachment; filename="${invoice.invoiceNumber}.pdf"`,
-            'Content-Length': pdf.length,
-            'Cache-Control': 'no-store',
-        })
-        return res.end(pdf)
-    } catch (err) {
-        console.error('Download invoice error:', err)
-        return res.status(200).json({ success: false, message: 'Something went wrong' })
-    }
+// Writes the PDF (again each time, so it always matches the booking) and returns its direct link
+const saveInvoicePdf = async (invoice, bookingId) => {
+    const fileName = invoiceFileName(invoice, bookingId)
+    await fs.mkdir(INVOICE_DIR, { recursive: true })
+    await fs.writeFile(path.join(INVOICE_DIR, fileName), await buildInvoicePdf(invoice))
+    return `${env.staticFileBaseUrl.replace(/\/+$/, '')}/${INVOICE_FOLDER}/${fileName}`
 }
 
 module.exports = {
@@ -2708,8 +2664,6 @@ module.exports = {
     listCancellationRequests,
     getRescheduleRequestDetails,
     getCancellationRequestDetails,
-    getInvoice,
-    downloadInvoice,
     getSalonBookingDetails,
     updateSalonBookingStatus,
     createBooking,

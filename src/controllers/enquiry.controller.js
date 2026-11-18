@@ -134,6 +134,8 @@ const sendEnquiry = async (req, res) => {
             entityName: [salon.salonName, service && service.serviceName].filter(Boolean).join(' · ').slice(0, 255),
             entityId: salon.salonId,
             centerId: 0,
+            // The User can follow up in the enquiry chat
+            customerId: customer.customerId,
             firstName: firstName.slice(0, 30),
             lastName: rest.join(' ').slice(0, 30),
             email: d.email,
@@ -462,6 +464,7 @@ const replySalonEnquiries = async (req, res) => {
         const services = [...new Set(rows.map((row) => row.serviceName).filter(Boolean))]
         const subject = d.subject || `Re: Your enquiry${services.length === 1 ? ` about ${services[0]}` : ''} - ${salonName}`
 
+        // Also added to each enquiry's chat
         await enquiryModel.saveSalonReply(partner.customerId, d.enquiryIds, { subject, message: d.message, now })
 
         // Each customer gets their own email (never one email to everyone)

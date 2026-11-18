@@ -6,6 +6,8 @@ const wlEnquiries = mysqlTable("wl_enquiries", {
 	entityName: varchar("entity_name", { length: 255 }),
 	entityId: int("entity_id").default(0),
 	centerId: int("center_id").default(0).notNull(),
+	// The User who sent it from the app (0 = website / admin enquiry); they can chat on it
+	customerId: int("customer_id").default(0).notNull(),
 	email: varchar({ length: 80 }).notNull(),
 	firstName: varchar("first_name", { length: 30 }).notNull(),
 	lastName: varchar("last_name", { length: 30 }).notNull(),
@@ -31,6 +33,8 @@ const wlEnquiries = mysqlTable("wl_enquiries", {
 	replySubject: varchar("reply_subject", { length: 200 }),
 	replyMessage: text("reply_message"),
 	replyDate: datetime("reply_date", { mode: 'string'}),
+	// When the last chat message was sent (wl_enquiry_messages)
+	lastMessageDate: datetime("last_message_date", { mode: 'string'}),
 	// The Salon Partner deleted it from their list (/api/enquiry/partner/delete); the admin panel still has it
 	salonDeleted: mysqlEnum("salon_deleted", ['0','1']).default('0').notNull(),
 	salonDeletedDate: datetime("salon_deleted_date", { mode: 'string'}),
@@ -44,6 +48,7 @@ const wlEnquiries = mysqlTable("wl_enquiries", {
 	primaryKey({ columns: [table.id], name: "wl_enquiries_id"}),
 	index("idx_enquiries_salon").on(table.inquiryType, table.entityId),
 	index("idx_enquiries_forwarded").on(table.forwardedFrom, table.entityId),
+	index("idx_enquiries_customer").on(table.customerId, table.inquiryType),
 ]);
 
 module.exports = { wlEnquiries };

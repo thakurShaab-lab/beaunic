@@ -142,4 +142,8 @@ module.exports = {
     findLatestEnquiries,
     findReviewSummary,
     findLatestReviews,
+    // The payment rules, shared with the Payment Report
+    isPaid,
+    isCash,
+    paidOn,
 }

@@ -3,6 +3,7 @@ const db = require("../config/drizzle")
 const { wlEnquiries } = require("../schema/wl-enquiries")
 const { wlCustomers } = require("../schema/wl-customers")
 const { wlServices } = require("../schema/wl-services")
+const { wlEnquiryMessages } = require("../schema/wl-enquiry-messages")
 
 // Active, approved salons with their active services, for the Salon / Service dropdown (one row per salon + service)
 const findEnquirySalons = async () =>
@@ -18,12 +19,23 @@ const findEnquirySalons = async () =>
         .where(and(eq(wlCustomers.customerType, "1"), eq(wlCustomers.status, "1"), isNotNull(wlCustomers.salonName)))
         .orderBy(asc(wlCustomers.salonName), asc(wlServices.serviceName))
 
-// Saves the enquiry in wl_enquiries (the same table as website enquiries); returns its ID
-const createEnquiry = async (values) => {
-    const [result] = await db.insert(wlEnquiries).values(values)
+// Saves the enquiry in wl_enquiries (the same table as website enquiries) and its message as the first chat
+// message; returns its ID
+const createEnquiry = async (values) =>
+    db.transaction(async (tx) => {
+        const [result] = await tx.insert(wlEnquiries).values({ ...values, lastMessageDate: values.receiveDate })
 
-    return result.insertId
-}
+        await tx.insert(wlEnquiryMessages).values({
+            enquiryId: result.insertId,
+            senderType: "customer",
+            senderId: values.customerId || 0,
+            message: values.message,
+            isRead: "0",
+            messageAddedDate: values.receiveDate,
+        })
+
+        return result.insertId
+    })
 
 // ---------------------------------------------------------------------------------------------------------------
 // Salon Partner: "Service Enquiries" — the enquiries customers sent to the partner's own salon from the app
@@ -113,15 +125,23 @@ const findSalonEnquiriesByIds = async (salonId, enquiryIds) =>
         .where(and(salonEnquiries(salonId), inArray(wlEnquiries.id, enquiryIds)))
         .orderBy(desc(wlEnquiries.receiveDate), desc(wlEnquiries.id))
 
-// Saves the partner's reply on their own enquiries and marks them Replied (reply_status Y)
-const saveSalonReply = async (salonId, enquiryIds, { subject, message, now }) => {
-    const [result] = await db
-        .update(wlEnquiries)
-        .set({ replyStatus: "Y", replySubject: subject, replyMessage: message, replyDate: now })
-        .where(and(salonEnquiries(salonId), inArray(wlEnquiries.id, enquiryIds)))
+// Saves the partner's reply on their own enquiries and marks them Replied (reply_status Y).
+// The reply is also added to each enquiry's chat. Returns the chat messages saved.
+const saveSalonReply = async (salonId, enquiryIds, { subject, message, now }) =>
+    db.transaction(async (tx) => {
+        await tx
+            .update(wlEnquiries)
+            .set({ replyStatus: "Y", replySubject: subject, replyMessage: message, replyDate: now, lastMessageDate: now })
+            .where(and(salonEnquiries(salonId), inArray(wlEnquiries.id, enquiryIds)))
 
-    return result.affectedRows
-}
+        const messages = []
+        for (const enquiryId of enquiryIds) {
+            const values = { enquiryId, senderType: "salon", senderId: salonId, message, isRead: "0", readDate: null, messageAddedDate: now }
+            const [result] = await tx.insert(wlEnquiryMessages).values(values)
+            messages.push({ messageId: result.insertId, ...values })
+        }
+        return messages
+    })
 
 // Removes the partner's own enquiries from their list (kept in the table for the admin panel)
 const deleteSalonEnquiries = async (salonId, enquiryIds, now) => {
