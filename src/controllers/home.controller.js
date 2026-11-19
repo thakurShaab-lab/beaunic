@@ -252,6 +252,12 @@ const getHomePage = async (req, res) => {
                         subtitle: `${service.bookedThisWeek.toLocaleString('en-IN')} booked this week · ${service.category}`,
                     })),
                 },
+                salonDetails: {
+                    title: 'Beaunic Salon Academy',
+                    city: 'Dildarnagar',
+                    openingDays: 'Mon – Sun',
+                    contactNumber: '+91 7007303966',
+                }
             }),
         })
     } catch (err) {

@@ -48,4 +48,14 @@ module.exports = {
   notifyProvider: process.env.NOTIFY_PROVIDER || 'console',
 
   logLevel: process.env.LOG_LEVEL || 'info',
+
+  // Address -> coordinates (Nearby Salons). provider: 'google' (Google Geocoding API) or 'none' (switched off).
+  // The key stays in the environment only.
+  geocoding: {
+    provider: (process.env.GEOCODING_PROVIDER || 'google').trim().toLowerCase(),
+    googleApiKey: process.env.GOOGLE_MAPS_API_KEY || '',
+    // Bias results to this country (ISO code), e.g. 'in'
+    region: process.env.GEOCODING_REGION || 'in',
+    timeoutMs: parseInt(process.env.GEOCODING_TIMEOUT_MS, 10) || 5000,
+  },
 }

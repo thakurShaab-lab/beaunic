@@ -7,6 +7,7 @@ const geoModel = require('../models/geo.model')
 const { validateRequestDevice } = require('./device&app.controller')
 const { findSalonPartner } = require('./membership.controller')
 const { convertNulls } = require('../utils/convertNulls')
+const { updateAddressCoordinates } = require('../services/addressLocation.service')
 
 const noMarkup = (v) => !/[<>]/.test(v)
 
@@ -161,6 +162,10 @@ const addAddress = async (req, res) => {
             })
         }
 
+        // The salon's position for Nearby Salons (geocoded now, never during a search). A failed lookup doesn't
+        // fail the save: the address is kept without coordinates.
+        const position = await updateAddressCoordinates(addressId)
+
         return res.status(200).json({
             success: true,
             message: 'Address added successfully',
@@ -179,6 +184,10 @@ const addAddress = async (req, res) => {
                 location: d.location ?? null,
                 pinCode: d.pinCode ?? null,
                 isDefault: isFirstAddress,
+                latitude: position.latitude ?? null,
+                longitude: position.longitude ?? null,
+                // 1 = the address was found on the map; 0 = not (it won't show in Nearby Salons until it is corrected)
+                locationFound: position.error ? 0 : 1,
             }),
         })
     } catch (err) {

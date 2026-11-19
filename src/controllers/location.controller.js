@@ -7,6 +7,7 @@ const { validateRequestDevice } = require('./device&app.controller')
 const { findLoggedInCustomer } = require('./profile.controller')
 const { optionalText, noMarkup } = require('./address.controller')
 const { convertNulls } = require('../utils/convertNulls')
+const { updateAddressCoordinates } = require('../services/addressLocation.service')
 
 const SEARCH_LIMIT = 20
 
@@ -41,7 +42,11 @@ const saveLocationSchema = z.object({
     city: optionalText(50),
     state: optionalText(50),
     pinCode: z.string().trim().regex(/^\d{6}$/, 'Must be a 6-digit PIN code').optional(),
-}).strict()
+}).strict().superRefine((d, ctx) => {
+    // The current location is a pair
+    if (d.latitude !== undefined && d.longitude === undefined) ctx.addIssue({ code: 'custom', path: ['longitude'], message: 'Longitude is required' })
+    if (d.longitude !== undefined && d.latitude === undefined) ctx.addIssue({ code: 'custom', path: ['latitude'], message: 'Latitude is required' })
+})
 
 // wl_cities titles carry a state hint, e.g. "Ghazipur (UP)" - show just "Ghazipur"
 const cityLabel = (title) => (title ? title.replace(/\s*\(.*?\)\s*/g, ' ').trim() : null)
@@ -146,8 +151,7 @@ const saveLocation = async (req, res) => {
 
     const d = parsed.data
 
-    // Coordinates alone can't be stored (no latitude/longitude columns), so something else must be sent
-    if (!d.locationId && [d.address, d.city, d.state, d.pinCode].every((v) => v === undefined)) {
+    if (!d.locationId && [d.address, d.city, d.state, d.pinCode, d.latitude].every((v) => v === undefined)) {
         return res.status(200).json({ success: false, message: 'Please select a location or share your current location.' })
     }
 
@@ -166,15 +170,20 @@ const saveLocation = async (req, res) => {
 
         // The selected locality fills in the address and city, and anything sent in the body takes priority.
         // A new location replaces the old one, so fields not sent are cleared rather than left from an older address.
-        // wl_customers_address_book has no latitude/longitude columns, so the coordinates are validated but not stored.
+        // The current location's coordinates are stored with it (Nearby Salons); without them the address is
+        // geocoded once here, so searches from this address never need a lookup.
+        const hasGps = d.latitude !== undefined
         const values = {
             address: d.address ?? (location ? location.locationName : null),
             city: d.city ?? (location ? cityLabel(location.cityName) : null),
             state: d.state ?? null,
             zipcode: d.pinCode ?? null,
+            latitude: hasGps ? addressModel.toCoordinate(d.latitude) : null,
+            longitude: hasGps ? addressModel.toCoordinate(d.longitude) : null,
         }
 
         const addressId = await saveSelectedLocation(customer, values)
+        const position = hasGps ? { latitude: d.latitude, longitude: d.longitude } : await updateAddressCoordinates(addressId)
 
         // Answer with what is now stored in wl_customers_address_book
         const saved = (await addressModel.findDefaultAddress(customer.customerId)) || { addressId, country: null, ...values }
@@ -191,8 +200,8 @@ const saveLocation = async (req, res) => {
                 state: saved.state,
                 pinCode: saved.zipcode,
                 country: saved.country,
-                latitude: d.latitude ?? null,
-                longitude: d.longitude ?? null,
+                latitude: position.latitude ?? null,
+                longitude: position.longitude ?? null,
             }),
         })
     } catch (err) {

@@ -16,6 +16,7 @@ const { validateRequestDevice } = require('./device&app.controller')
 const { detectImageExt, UPLOAD_DIR } = require('./auth.controller')
 const { contactAndAddressFields, toAddressColumns, formatOrderAddress, optionalText, noMarkup, checkCountryAndCity, savedId } = require('./address.controller')
 const { convertNulls } = require('../utils/convertNulls')
+const { updateAddressCoordinates } = require('../services/addressLocation.service')
 const { resolveMediaUrl } = require('../utils/mediaUrl')
 
 const SERVICE_TYPE_LABELS = {
@@ -317,11 +318,12 @@ const updateProfile = async (req, res) => {
 
         if (hasValue(addressValues)) {
             const existing = await addressModel.findDefaultAddress(customer.customerId)
+            let savedAddressId = existing?.addressId
 
             if (existing) {
                 await addressModel.updateAddress(existing.addressId, addressValues)
             } else {
-                await addressModel.createAddress({
+                savedAddressId = await addressModel.createAddress({
                     customerId: customer.customerId,
                     name: customer.firstName ? customer.firstName.slice(0, 32) : null,
                     ...addressValues,
@@ -330,6 +332,9 @@ const updateProfile = async (req, res) => {
                     recivDate: authModel.nowString(),
                 })
             }
+
+            // The changed address is found on the map again (Nearby Salons); never fails the update
+            await updateAddressCoordinates(savedAddressId)
 
             const order = await membershipModel.findActiveMembership(customer.customerId)
             const saved = order && await addressModel.findDefaultAddress(customer.customerId)

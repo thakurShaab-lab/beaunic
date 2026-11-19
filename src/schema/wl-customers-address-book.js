@@ -1,4 +1,4 @@
-const { mysqlTable, mysqlEnum, primaryKey, int, varchar, text, datetime } = require("drizzle-orm/mysql-core");
+const { mysqlTable, mysqlEnum, primaryKey, index, int, varchar, text, datetime, decimal } = require("drizzle-orm/mysql-core");
 
 const wlCustomersAddressBook = mysqlTable("wl_customers_address_book", {
 	addressId: int("address_id").autoincrement().notNull(),
@@ -20,9 +20,15 @@ const wlCustomersAddressBook = mysqlTable("wl_customers_address_book", {
 	defaultStatus: mysqlEnum("default_status", ['Y','N']).default('N').notNull(),
 	additionalNumbers: text("additional_numbers"),                                  // Mew Field    // Comma-separated extra contact numbers
 	supportNumber: varchar("support_number", { length: 25 }),                       // Mew Field    // Customer support number
+	// Where the address is (drizzle/migrations/0029). Salons: geocoded from the address when it is saved;
+	// customers: their GPS location or the geocoded address. NULL = not known (never searched as a salon).
+	latitude: decimal({ precision: 10, scale: 7 }),
+	longitude: decimal({ precision: 10, scale: 7 }),
 },
 (table) => [
 	primaryKey({ columns: [table.addressId], name: "wl_customers_address_book_address_id"}),
+	index("idx_address_book_customer").on(table.customerId, table.defaultStatus),
+	index("idx_address_book_coordinates").on(table.latitude, table.longitude),
 ]);
 
 module.exports = { wlCustomersAddressBook };

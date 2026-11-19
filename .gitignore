@@ -36,3 +36,7 @@ target/
 # Temporary files
 *.tmp
 *.swp
+
+
+Pending.txt
+tests/

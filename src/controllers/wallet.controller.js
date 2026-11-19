@@ -220,4 +220,151 @@ const addMoney = async (req, res) => {
     }
 }
 
-module.exports = { getWalletDetails, addMoney, dateLabel }
+// ---------- Salon Partner: "My Wallet" and its Add Money sheet ----------
+// The partner's wallet is the same ledger (wl_wallet_transactions with customer_id = the salon),
+// the one the partner home's wallet card already reads.
+
+const partnerWalletSchema = z.object({
+    ...deviceFields,
+    page: walletDetailsSchema.shape.page,
+    limit: walletDetailsSchema.shape.limit,
+}).strict()
+
+// Salon Partners only (customer_type 1)
+const findSalonPartner = async (req, res, data) => {
+    const customer = await findLoggedInCustomer(req, res, data)
+    if (!customer) return null
+
+    if (customer.customerType !== '1') {
+        res.status(200).json({ success: false, message: 'This feature is only available for Salon Partners.' })
+        return null
+    }
+
+    return customer
+}
+
+// What the second line starts with: "Refund · ORD-5007", "Money added", "ORD-5012"
+const PARTNER_KINDS = { refund: 'Refund', topup: 'Money added', cashback: 'Cashback' }
+
+// One row: "Received" / "Paid", "Refund · ORD-5007 · 06 Oct 2026", "+ ₹8,500" / "− ₹1,200"
+const formatPartnerTransaction = (row) => {
+    const credit = row.transactionType === 'credit'
+    const amount = Number(row.amount)
+    const date = dateLabel(row.transactionAddedDate)
+
+    return {
+        transactionId: row.transactionId,
+        title: statusText(row),
+        transactionType: row.transactionType,
+        category: row.category,
+        status: row.status,
+        icon: credit ? 'arrow_down' : 'arrow_up',
+        referenceNumber: row.referenceNumber,
+        subtitle: [PARTNER_KINDS[row.category], row.referenceNumber, date].filter(Boolean).join(' · '),
+        amount,
+        amountLabel: `${credit ? '+' : '−'} ${rupees(amount)}`,
+        date,
+        transactionAddedDate: row.transactionAddedDate,
+    }
+}
+
+const partnerAddMoneySheet = { title: 'Add Money', placeholder: 'Enter amount', quickAmounts: QUICK_AMOUNTS.map((amount) => ({ amount, label: rupees(amount) })), minAmount: MIN_TOPUP, maxAmount: MAX_TOPUP, buttonLabel: 'ADD MONEY' }
+
+// "My Wallet" (Salon Partner): Available Balance card with the salon name, and Transaction History
+const getPartnerWallet = async (req, res) => {
+    if (!(await validateRequestDevice(req, res))) return
+
+    const parsed = partnerWalletSchema.safeParse(req.body)
+
+    if (!parsed.success) return sendValidationError(res, parsed.error)
+
+    const page = parsed.data.page ?? 1
+    const limit = parsed.data.limit ?? DEFAULT_PAGE_SIZE
+
+    try {
+        const partner = await findSalonPartner(req, res, parsed.data)
+        if (!partner) return
+
+        const salonId = partner.customerId
+        const [profile, summary, total, rows] = await Promise.all([
+            authModel.findProfile(salonId),
+            walletModel.findWalletSummary(salonId),
+            walletModel.countTransactions(salonId, {}),
+            walletModel.findTransactions(salonId, { limit, offset: (page - 1) * limit }),
+        ])
+
+        const balance = balanceOf(summary)
+        const totalPages = Math.ceil(total / limit)
+
+        return res.status(200).json({
+            success: true,
+            message: rows.length
+                ? 'Wallet details fetched successfully'
+                : total ? 'No more transactions' : 'No transactions yet',
+            data: convertNulls({
+                title: 'My Wallet',
+                balanceCard: {
+                    label: 'Available Balance',
+                    balance,
+                    balanceLabel: rupees(balance),
+                    salonName: profile?.salonName || profile?.firstName || null,
+                    addMoneyLabel: '+ ADD MONEY',
+                },
+                transactionHistoryTitle: 'Transaction History',
+                transactions: rows.map(formatPartnerTransaction),
+                pagination: { page, limit, total, totalPages, hasNextPage: page < totalPages },
+                addMoney: partnerAddMoneySheet,
+            }),
+        })
+    } catch (err) {
+        console.error('Partner wallet error:', err)
+        return res.status(200).json({ success: false, message: 'Something went wrong' })
+    }
+}
+
+// "Add Money" (Salon Partner): tops up the partner's wallet. Same rules as the customer top-up.
+const addPartnerMoney = async (req, res) => {
+    if (!(await validateRequestDevice(req, res))) return
+
+    const parsed = addMoneySchema.safeParse(req.body)
+
+    if (!parsed.success) return sendValidationError(res, parsed.error)
+
+    const amount = toPaise(parsed.data.amount) / 100
+
+    try {
+        const partner = await findSalonPartner(req, res, parsed.data)
+        if (!partner) return
+
+        // No payment gateway is connected yet, so the top-up is credited straight away
+        const values = {
+            customerId: partner.customerId,
+            transactionType: 'credit',
+            category: 'topup',
+            amount: amount.toFixed(2),
+            referenceNumber: null,
+            referenceId: 0,
+            description: 'Wallet top-up',
+            paymentMethod: parsed.data.paymentMethod || null,
+            status: '1',
+            transactionAddedDate: authModel.nowString(),
+        }
+        const transactionId = await walletModel.addTransaction(values)
+        const balance = balanceOf(await walletModel.findWalletSummary(partner.customerId))
+
+        return res.status(200).json({
+            success: true,
+            message: `${rupees(amount)} added to your wallet`,
+            data: convertNulls({
+                transaction: formatPartnerTransaction({ ...values, transactionId }),
+                balance,
+                balanceLabel: rupees(balance),
+            }),
+        })
+    } catch (err) {
+        console.error('Partner add money error:', err)
+        return res.status(200).json({ success: false, message: 'Something went wrong' })
+    }
+}
+
+module.exports = { getWalletDetails, addMoney, getPartnerWallet, addPartnerMoney, dateLabel }

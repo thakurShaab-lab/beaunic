@@ -12,7 +12,7 @@
     "db:split": "node scripts/db-pull.js --split-only",
     "db:check-schema": "node -e \"require('./src/schema')\"",
     "db:verify": "node scripts/verify-schema.js",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "node --test tests/"
   },
   "keywords": [],
   "author": "",

@@ -6,8 +6,8 @@ const { wlBookingSlots } = require("./wl-booking-slots");
 // Same columns as wl_orders, plus the booking fields at the end
 const wlBookings = mysqlTable("wl_bookings", {
 	bookingId: int("booking_id").autoincrement().notNull(),
-	customerId: int("customer_id").default(0).notNull().references(() => wlCustomers.customerId),  // wl_customers, the User (customer_type 2) who booked
-	customerType: varchar("customer_type", { length: 100 }).default('Member'),
+	customerId: int("customer_id").references(() => wlCustomers.customerId),  // wl_customers, the User (customer_type 2) who booked; NULL = an offline client
+	customerType: varchar("customer_type", { length: 100 }).default('Member'),                    // Member = booked in the app, Offline = made by the partner (wl_offline_bookings)
 	invoiceNumber: varchar("invoice_number", { length: 30 }),
 	firstName: varchar("first_name", { length: 50 }),
 	lastName: varchar("last_name", { length: 50 }),

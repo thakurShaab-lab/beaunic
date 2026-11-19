@@ -13,7 +13,7 @@ const { sendMail, escapeHtml } = require('../utils/sendMail')
 const INTRO = 'Ask about services, availability or bridal packages. The salon replies by email.'
 
 // wl_enquiries.type 1 = Contact Us; salon enquiries are told apart by inquiry_type
-const ENQUIRY_TYPE = '1'
+const ENQUIRY_TYPE = '4'
 const INQUIRY_TYPE = 'Salon Enquiry'
 
 const deviceFields = {

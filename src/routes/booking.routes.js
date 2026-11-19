@@ -2,6 +2,7 @@ const express = require('express')
 const { createBooking, getBookingSummary, getPaymentMethods, payForBooking, getBookingSuccess, getCancelOptions, cancelBooking, rescheduleBooking, listBookings, getBookingDetails, listBookingRequests, respondBookingRequest, recordBookingPayment, listSalonBookings, getSalonBookingDetails, updateSalonBookingStatus, listCancellationRequests, getRescheduleRequestDetails, getCancellationRequestDetails } = require('../controllers/booking.controller')
 const { jwtAuthMiddleware, deviceAuthMiddleware } = require('../middleware/auth.middleware')
 const { parsePayload } = require('../middleware/payload.middleware')
+const offline = require('../controllers/offlineBooking.controller')
 
 const router = express.Router()
 
@@ -34,5 +35,16 @@ router.post('/partner/cancellation-requests', jwtAuthMiddleware, parsePayload(),
 router.post('/partner/cancellation-request', jwtAuthMiddleware, parsePayload(), deviceAuthMiddleware, getCancellationRequestDetails)
 // 'Reschedule Request': one booking's reschedule request (Approve / Reject via /requests/respond)
 router.post('/partner/reschedule-request', jwtAuthMiddleware, parsePayload(), deviceAuthMiddleware, getRescheduleRequestDetails)
+
+// 'Offline Client Order' (Salon Partners only), 4 steps; every response has steps [{ step, status }] and currentStep
+const offlineRoute = (path, handler) => router.post(`/offline/${path}`, jwtAuthMiddleware, parsePayload(), deviceAuthMiddleware, handler)
+offlineRoute('client', offline.saveClient)            // Step 1: client name + mobile (starts the offline booking)
+offlineRoute('services', offline.listServices)        // Step 2: the services to choose from
+offlineRoute('service', offline.saveService)          // Step 2: NEXT
+offlineRoute('slots', offline.listSlots)              // Step 3: date strip + time slots
+offlineRoute('slot', offline.saveSlot)                // Step 3: NEXT
+offlineRoute('details', offline.getOfflineBooking)    // Step 4 'Order Summary', or resume at any step
+offlineRoute('confirm', offline.confirmBooking)       // Step 4: CREATE ORDER (payment mode)
+offlineRoute('list', offline.listOfflineBookings)     // Drafts to resume and confirmed offline bookings
 
 module.exports = router
