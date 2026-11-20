@@ -2,6 +2,7 @@ const { eq, and, ne, asc, desc, inArray, count, sql } = require("drizzle-orm")
 const db = require("../config/drizzle")
 const { wlEmployees } = require("../schema/wl-employees")
 const { wlBookings } = require("../schema/wl-bookings")
+const { wlCustomers } = require("../schema/wl-customers")
 
 // wl_employees.status: 1=Active, 0=Inactive, 2=Deleted. A partner only ever reaches their own salon's employees.
 const salonEmployees = (salonId) => and(eq(wlEmployees.salonId, salonId), ne(wlEmployees.status, "2"))
@@ -61,7 +62,46 @@ const countUpcomingBookings = async (salonId, employeeIds) => {
     return new Map(rows.map((row) => [row.employeeId, Number(row.total)]))
 }
 
+// The active employees of the active salons a customer has booked at (any booking of theirs, whatever its status),
+// optionally one salon only. Salon first (by name), then employees by name.
+const findEmployeesOfBookedSalons = async (customerId, { salonId } = {}) =>
+    db
+        .select({
+            employeeId: wlEmployees.employeeId,
+            employeeName: wlEmployees.employeeName,
+            designation: wlEmployees.designation,
+            employeeImage: wlEmployees.employeeImage,
+            salonId: wlCustomers.customerId,
+            salonName: wlCustomers.salonName,
+        })
+        .from(wlEmployees)
+        .innerJoin(wlCustomers, eq(wlCustomers.customerId, wlEmployees.salonId))
+        .where(
+            and(
+                eq(wlEmployees.status, "1"),
+                // An active Salon Partner
+                eq(wlCustomers.customerType, "1"),
+                eq(wlCustomers.status, "1"),
+                salonId !== undefined ? eq(wlEmployees.salonId, salonId) : undefined,
+                sql`EXISTS (SELECT 1 FROM wl_bookings b WHERE b.customer_id = ${customerId} AND b.salon_id = ${wlEmployees.salonId})`
+            )
+        )
+        .orderBy(asc(wlCustomers.salonName), asc(wlCustomers.customerId), asc(wlEmployees.employeeName))
+
+// Whether the customer has any booking at the salon
+const hasBookingAtSalon = async (customerId, salonId) => {
+    const rows = await db
+        .select({ bookingId: wlBookings.bookingId })
+        .from(wlBookings)
+        .where(and(eq(wlBookings.customerId, customerId), eq(wlBookings.salonId, salonId)))
+        .limit(1)
+
+    return rows.length > 0
+}
+
 module.exports = {
+    findEmployeesOfBookedSalons,
+    hasBookingAtSalon,
     findSalonEmployees,
     findActiveSalonEmployees,
     findSalonEmployee,

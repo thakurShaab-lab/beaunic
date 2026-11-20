@@ -1,4 +1,4 @@
-const { eq, and, asc, like, count } = require("drizzle-orm")
+const { eq, and, or, asc, like, count } = require("drizzle-orm")
 const db = require("../config/drizzle")
 const { wlCountries } = require("../schema/wl-countries")
 const { wlCities } = require("../schema/wl-cities")
@@ -72,4 +72,42 @@ const findCountryAndCityNames = async (countryId, cityId) => {
     return { countryName: country[0]?.name ?? null, cityName: city[0]?.name ?? null }
 }
 
-module.exports = { findActiveCountries, findActiveCountry, findActiveCitiesByCountry, findActiveCity, findCountryAndCityNames }
+// The active country with this ISO 3166 2-letter code (e.g. "IN"), for a reverse-geocoded address
+const findActiveCountryByIsoCode = async (isoCode2) => {
+    const rows = await db
+        .select({ countryId: wlCountries.id, countryName: wlCountries.countryName })
+        .from(wlCountries)
+        .where(and(eq(wlCountries.countryIsoCode2, isoCode2), eq(wlCountries.status, "1")))
+        .limit(1)
+
+    return rows[0] || null
+}
+
+// Active cities of a country whose title starts with one of the names, e.g. "Ghazipur" finds "Ghazipur (UP)".
+// The caller picks the exact match (titles carry a state hint in brackets).
+const findActiveCitiesStartingWith = async (countryId, names) => {
+    const wanted = names.filter(Boolean)
+    if (!wanted.length) return []
+
+    return db
+        .select({ cityId: wlCities.cityId, cityName: wlCities.title })
+        .from(wlCities)
+        .where(
+            and(
+                eq(wlCities.countryId, countryId),
+                eq(wlCities.status, "1"),
+                or(...wanted.map((name) => like(wlCities.title, `${escapeLike(name)}%`)))
+            )
+        )
+        .limit(50)
+}
+
+module.exports = {
+    findActiveCountries,
+    findActiveCountry,
+    findActiveCitiesByCountry,
+    findActiveCity,
+    findCountryAndCityNames,
+    findActiveCountryByIsoCode,
+    findActiveCitiesStartingWith,
+}

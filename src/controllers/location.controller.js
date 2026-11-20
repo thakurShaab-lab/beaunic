@@ -5,9 +5,8 @@ const addressModel = require('../models/address.model')
 const authModel = require('../models/auth.model')
 const { validateRequestDevice } = require('./device&app.controller')
 const { findLoggedInCustomer } = require('./profile.controller')
-const { optionalText, noMarkup } = require('./address.controller')
 const { convertNulls } = require('../utils/convertNulls')
-const { updateAddressCoordinates } = require('../services/addressLocation.service')
+const locationAddress = require('../services/locationAddress.service')
 
 const SEARCH_LIMIT = 20
 
@@ -31,18 +30,20 @@ const latitude = z.coerce.number({ error: 'Latitude must be a number' })
 const longitude = z.coerce.number({ error: 'Longitude must be a number' })
     .min(-180, 'Longitude must be between -180 and 180').max(180, 'Longitude must be between -180 and 180')
 
-// One body for both ways of choosing: locationId from the dropdown/search, and/or the current location details.
-// Every field is optional. Lengths follow the wl_customers_address_book columns.
+// Two ways of choosing, one per request: locationId (the serviceable locations dropdown / search) or
+// latitude + longitude (Use Current Location). The address itself (address, city, state, PIN code, country) is
+// worked out on the server, so it isn't accepted from the app.
 const saveLocationSchema = z.object({
     ...deviceFields,
-    locationId: z.coerce.number({ error: 'Location ID must be a number' }).int().positive('Location ID must be a number').optional(),
+    locationId: z.coerce.number({ error: 'Location ID must be a number' }).int('Location ID must be a number').positive('Location ID must be a number').optional(),
     latitude: latitude.optional(),
     longitude: longitude.optional(),
-    address: optionalText(200),
-    city: optionalText(50),
-    state: optionalText(50),
-    pinCode: z.string().trim().regex(/^\d{6}$/, 'Must be a 6-digit PIN code').optional(),
 }).strict().superRefine((d, ctx) => {
+    const hasPoint = d.latitude !== undefined || d.longitude !== undefined
+    if (d.locationId !== undefined && hasPoint) {
+        ctx.addIssue({ code: 'custom', path: ['locationId'], message: 'Send either a location or your current location, not both.' })
+        return
+    }
     // The current location is a pair
     if (d.latitude !== undefined && d.longitude === undefined) ctx.addIssue({ code: 'custom', path: ['longitude'], message: 'Longitude is required' })
     if (d.longitude !== undefined && d.latitude === undefined) ctx.addIssue({ code: 'custom', path: ['latitude'], message: 'Latitude is required' })
@@ -151,7 +152,7 @@ const saveLocation = async (req, res) => {
 
     const d = parsed.data
 
-    if (!d.locationId && [d.address, d.city, d.state, d.pinCode, d.latitude].every((v) => v === undefined)) {
+    if (d.locationId === undefined && d.latitude === undefined) {
         return res.status(200).json({ success: false, message: 'Please select a location or share your current location.' })
     }
 
@@ -159,50 +160,25 @@ const saveLocation = async (req, res) => {
         const customer = await findUser(req, res, d)
         if (!customer) return
 
-        let location = null
+        // The whole address, from our tables (locationId) or from the map (latitude + longitude). Nothing is saved
+        // when the location isn't available or no address is found at the position.
+        const result = d.locationId !== undefined
+            ? await locationAddress.addressFromLocation(d.locationId)
+            : await locationAddress.addressFromCoordinates(d.latitude, d.longitude)
 
-        if (d.locationId) {
-            location = await locationModel.findActiveLocationById(d.locationId)
-            if (!location) {
-                return res.status(200).json({ success: false, message: 'Location not found or not available.' })
-            }
+        if (result.error) {
+            return res.status(200).json({ success: false, message: result.message, field: result.field })
         }
 
-        // The selected locality fills in the address and city, and anything sent in the body takes priority.
-        // A new location replaces the old one, so fields not sent are cleared rather than left from an older address.
-        // The current location's coordinates are stored with it (Nearby Salons); without them the address is
-        // geocoded once here, so searches from this address never need a lookup.
-        const hasGps = d.latitude !== undefined
-        const values = {
-            address: d.address ?? (location ? location.locationName : null),
-            city: d.city ?? (location ? cityLabel(location.cityName) : null),
-            state: d.state ?? null,
-            zipcode: d.pinCode ?? null,
-            latitude: hasGps ? addressModel.toCoordinate(d.latitude) : null,
-            longitude: hasGps ? addressModel.toCoordinate(d.longitude) : null,
-        }
-
-        const addressId = await saveSelectedLocation(customer, values)
-        const position = hasGps ? { latitude: d.latitude, longitude: d.longitude } : await updateAddressCoordinates(addressId)
-
-        // Answer with what is now stored in wl_customers_address_book
-        const saved = (await addressModel.findDefaultAddress(customer.customerId)) || { addressId, country: null, ...values }
+        // The new location replaces the customer's default address completely, so nothing of an older one is left
+        const addressId = await saveSelectedLocation(customer, result.values)
 
         return res.status(200).json({
             success: true,
-            message: 'Location saved successfully',
-            data: convertNulls({
-                addressId: saved.addressId,
-                source: location ? 'manual' : 'current',
-                locationId: location ? location.locationId : null,
-                address: saved.address,
-                city: saved.city,
-                state: saved.state,
-                pinCode: saved.zipcode,
-                country: saved.country,
-                latitude: position.latitude ?? null,
-                longitude: position.longitude ?? null,
-            }),
+            message: result.place.locationFound
+                ? 'Location saved successfully'
+                : 'Location saved successfully, but it could not be found on the map',
+            data: convertNulls({ addressId, ...result.place }),
         })
     } catch (err) {
         console.error('Save location error:', err)

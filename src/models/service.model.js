@@ -228,7 +228,29 @@ const findActiveServiceWithSalon = async (serviceId) => {
     return rows[0] || null
 }
 
+// The categories of the services in a list's scope (one salon's, or every salon's with activeOnly), for the
+// category chips of /service/list. The list's other filters are left out so every chip stays available.
+// A User sees only active categories with an active service; a partner every category they have a service in.
+const findServiceCategories = async (customerId, { activeOnly = false } = {}) =>
+    db
+        .selectDistinct({
+            categoryId: wlCategories.categoryId,
+            categoryName: wlCategories.categoryName,
+            sortOrder: wlCategories.sortOrder,
+        })
+        .from(wlServices)
+        .innerJoin(wlCategories, eq(wlCategories.categoryId, wlServices.categoryId))
+        .leftJoin(salon, eq(salon.customerId, wlServices.customerId))
+        .where(
+            and(
+                customerId !== undefined ? eq(wlServices.customerId, customerId) : undefined,
+                activeOnly ? and(visibleToUsers, eq(wlCategories.status, "1")) : and(ne(wlServices.status, "2"), ne(wlCategories.status, "2"))
+            )
+        )
+        .orderBy(sql`${wlCategories.sortOrder} IS NULL`, asc(wlCategories.sortOrder), asc(wlCategories.categoryName))
+
 module.exports = {
+    findServiceCategories,
     findActiveServiceWithSalon,
     updateServiceStatus,
     findCustomerService,

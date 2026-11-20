@@ -5,7 +5,8 @@ const { parsePayload } = require('../middleware/payload.middleware')
 
 const router = express.Router()
 
-// Salon Partners (customer_type 1) only. The photo is optional, in the "employeeImage" file field.
+// Salon Partners (customer_type 1) manage employees; /list is also open to Users (employees of salons they have booked).
+// The photo is optional, in the "employeeImage" file field.
 router.post('/create', jwtAuthMiddleware, parsePayload('employeeImage'), deviceAuthMiddleware, createEmployee)
 router.post('/update', jwtAuthMiddleware, parsePayload('employeeImage'), deviceAuthMiddleware, updateEmployee)
 router.post('/delete', jwtAuthMiddleware, parsePayload(), deviceAuthMiddleware, deleteEmployee)

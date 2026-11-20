@@ -2,6 +2,7 @@ const { eq, and, or, like, asc } = require("drizzle-orm")
 const db = require("../config/drizzle")
 const { wlLocalities } = require("../schema/wl-localities")
 const { wlCities } = require("../schema/wl-cities")
+const { wlCountries } = require("../schema/wl-countries")
 
 const activeLocationsQuery = (condition) =>
     db
@@ -31,4 +32,29 @@ const findActiveLocationById = async (locationId) => {
     return rows[0] || null
 }
 
-module.exports = { findActiveLocations, searchActiveLocations, findActiveLocationById }
+// A locality with its city (wl_localities.city_id) and that city's country (wl_cities.country_id), whatever their
+// status, so the caller can say which one is missing or unavailable. null when the locality doesn't exist.
+const findLocationWithPlace = async (locationId) => {
+    const rows = await db
+        .select({
+            locationId: wlLocalities.locationId,
+            locationName: wlLocalities.title,
+            locationStatus: wlLocalities.status,
+            cityId: wlLocalities.cityId,
+            cityName: wlCities.title,
+            cityStatus: wlCities.status,
+            countryId: wlCountries.id,
+            countryName: wlCountries.countryName,
+            countryCode: wlCountries.countryIsoCode2,
+            countryStatus: wlCountries.status,
+        })
+        .from(wlLocalities)
+        .leftJoin(wlCities, eq(wlCities.cityId, wlLocalities.cityId))
+        .leftJoin(wlCountries, eq(wlCountries.id, wlCities.countryId))
+        .where(eq(wlLocalities.locationId, locationId))
+        .limit(1)
+
+    return rows[0] || null
+}
+
+module.exports = { findActiveLocations, searchActiveLocations, findActiveLocationById, findLocationWithPlace }

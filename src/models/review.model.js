@@ -41,6 +41,23 @@ const findReviewableService = async (serviceId) =>
 const findReviewableSalon = async (salonId) =>
     (await reviewableSalonsQuery(eq(salon.customerId, salonId)).limit(1))[0] || null
 
+// An active employee of an active salon
+const findReviewableEmployee = async (employeeId) => {
+    const rows = await db
+        .select({
+            itemId: wlEmployees.employeeId,
+            itemName: wlEmployees.employeeName,
+            salonId: salon.customerId,
+            salonName: salon.salonName,
+        })
+        .from(wlEmployees)
+        .innerJoin(salon, eq(salon.customerId, wlEmployees.salonId))
+        .where(and(eq(wlEmployees.employeeId, employeeId), eq(wlEmployees.status, "1"), activeSalon))
+        .limit(1)
+
+    return rows[0] || null
+}
+
 const createReview = async (values) => {
     const [result] = await db.insert(wlReviews).values(values)
 
@@ -58,6 +75,7 @@ const findCustomerReviews = async (customerId, { reviewType } = {}) =>
             salonId: wlReviews.salonId,
             salonName: salon.salonName,
             serviceName: wlServices.serviceName,
+            employeeName: wlEmployees.employeeName,
             rating: wlReviews.rating,
             reviewText: wlReviews.reviewText,
             status: wlReviews.status,
@@ -65,9 +83,14 @@ const findCustomerReviews = async (customerId, { reviewType } = {}) =>
         })
         .from(wlReviews)
         .leftJoin(salon, eq(salon.customerId, wlReviews.salonId))
+        // review_for_id of a service and of a product review is a wl_services ID
         .leftJoin(
             wlServices,
-            and(eq(wlReviews.reviewType, "service"), eq(wlServices.serviceId, wlReviews.reviewForId))
+            and(inArray(wlReviews.reviewType, ["service", "product"]), eq(wlServices.serviceId, wlReviews.reviewForId))
+        )
+        .leftJoin(
+            wlEmployees,
+            and(eq(wlReviews.reviewType, "employee"), eq(wlEmployees.employeeId, wlReviews.reviewForId))
         )
         .where(
             and(
@@ -164,7 +187,7 @@ const findPartnerReviews = async (salonId, filters, { sortBy = "newest", limit, 
         // Only the partner's own service / employee (never another salon's, even with a wrong review_for_id)
         .leftJoin(
             wlServices,
-            and(eq(wlReviews.reviewType, "service"), eq(wlServices.serviceId, wlReviews.reviewForId), eq(wlServices.customerId, wlReviews.salonId))
+            and(inArray(wlReviews.reviewType, ["service", "product"]), eq(wlServices.serviceId, wlReviews.reviewForId), eq(wlServices.customerId, wlReviews.salonId))
         )
         .leftJoin(
             wlEmployees,
@@ -222,6 +245,7 @@ module.exports = {
     findServiceReviews,
     findReviewableService,
     findReviewableSalon,
+    findReviewableEmployee,
     createReview,
     findCustomerReviews,
     findPartnerReviews,

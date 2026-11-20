@@ -149,7 +149,11 @@ const lettersAndDigits = (value) => (typeof value === 'string' ? value.toLowerCa
 const listServicesSchema = z.object({
     ...deviceFields,
     // User only: one salon's services; unset lists every active salon's. A Salon Partner always gets their own.
-    salonId: z.coerce.number({ error: 'Salon ID must be a number' }).int().positive('Salon ID must be a number').optional(),
+    // Users: optional, the salon whose services to list (without it, every salon's). Salon Partners always get their own.
+    salonId: z.preprocess(
+        (value) => (typeof value === 'string' && !value.trim() ? undefined : value ?? undefined),
+        z.coerce.number({ error: 'Salon ID must be a number' }).int('Salon ID must be a number').positive('Salon ID must be a number').optional()
+    ),
     serviceId: z.coerce.number({ error: 'Service ID must be a number' }).int().positive('Service ID must be a number').optional(),
     categoryId: z.coerce.number({ error: 'Category ID must be a number' }).int().positive('Category ID must be a number').optional(),
     priceRange: z.preprocess(
@@ -469,15 +473,15 @@ const listServices = async (req, res) => {
         if (!customer) return
 
         // A Salon Partner sees their own services (active and inactive); a User sees active services of
-        // active salons: one salon's when salonId is sent, otherwise every salon's
+        // active salons: the salon sent (salonId) only, otherwise every salon's
         const isUser = customer.customerType !== '1'
         const salonId = isUser ? parsed.data.salonId : customer.customerId
 
         if (isUser && salonId !== undefined && !(await complaintModel.findActiveSalon(salonId))) {
-            return res.status(200).json({ success: false, message: 'Salon not found.' })
+            return res.status(200).json({ success: false, message: 'Salon not found.', field: 'salonId' })
         }
 
-        const [services, membership, favoritesCount, address] = await Promise.all([
+        const [services, membership, favoritesCount, address, categories] = await Promise.all([
             serviceModel.findCustomerServicesWithCategory(salonId, {
                 activeOnly: isUser,
                 serviceId,
@@ -495,6 +499,8 @@ const listServices = async (req, res) => {
             favoriteModel.countCustomerFavorites(customer.customerId),
             // The logged-in customer's saved city (default address), as in /category/list
             addressModel.findDefaultAddress(customer.customerId),
+            // The category chips: the categories of the services in this list's scope (not needed for one service)
+            serviceId !== undefined ? [] : serviceModel.findServiceCategories(salonId, { activeOnly: isUser }),
         ])
 
         // { city, state }, or null (sent as "") when the customer has no saved city: same as /category/list
@@ -524,7 +530,7 @@ const listServices = async (req, res) => {
             is_favorite: favoriteIds.has(service.serviceId) ? 1 : 0,
             // The salon the service belongs to (both customer types)
             salon_id: service.customerId,
-            // A User's list can mix salons, so each service says whose it is (needed for /service/details)
+            // Without salonId a User's list can mix salons, so each service says whose it is (needed for /service/details)
             ...(isUser && { salonId: service.customerId, salonName: service.salonName }),
         }))
 
@@ -556,6 +562,8 @@ const listServices = async (req, res) => {
                     minRating: minRating ?? null,
                     sortBy: sortBy ?? null,
                 },
+                // The categories of these services (send categoryId to filter by one)
+                categories: categories.map((category) => ({ categoryId: category.categoryId, categoryName: category.categoryName })),
                 services: formatted,
             }),
         })

@@ -14,7 +14,7 @@ const bookingModel = require('../models/booking.model')
 const favoriteModel = require('../models/favorite.model')
 const { validateRequestDevice } = require('./device&app.controller')
 const { detectImageExt, UPLOAD_DIR } = require('./auth.controller')
-const { contactAndAddressFields, toAddressColumns, formatOrderAddress, optionalText, noMarkup, checkCountryAndCity, savedId } = require('./address.controller')
+const { contactAndAddressFields, toAddressColumns, formatOrderAddress, optionalText, noMarkup, savedId } = require('./address.controller')
 const { convertNulls } = require('../utils/convertNulls')
 const { updateAddressCoordinates } = require('../services/addressLocation.service')
 const { resolveMediaUrl } = require('../utils/mediaUrl')
@@ -31,16 +31,27 @@ const deviceFields = {
 
 const getProfileSchema = z.object(deviceFields).strict()
 
+const GENDERS = ['Male', 'Female', 'Other', 'Prefer not to say']
+
 const PROFILE_FIELDS = {
     salonName: optionalText(100),
     name: z.preprocess(
         (value) => typeof value === 'string' && !value.trim() ? undefined : value,
         z.string().trim().min(2).max(32).regex(/^[\p{L}\p{M} .'-]+$/u, 'Invalid characters in name').optional()
     ),
-    // wl_customers.gender; "male" / "FEMALE" are accepted too
+    // wl_customers.gender; "male" / "FEMALE" / "prefer not to say" are accepted too
     gender: z.preprocess(
-        (value) => typeof value === 'string' ? value.trim().charAt(0).toUpperCase() + value.trim().slice(1).toLowerCase() : value,
-        z.enum(['Male', 'Female'], { error: 'Gender must be Male or Female' }).optional()
+        (value) => typeof value === 'string' ? value.trim().replace(/\s+/g, ' ').charAt(0).toUpperCase() + value.trim().replace(/\s+/g, ' ').slice(1).toLowerCase() || undefined : value,
+        z.enum(GENDERS, { error: `Gender must be one of: ${GENDERS.join(', ')}` }).optional()
+    ),
+    // "Edit Profile" (Users): the account's login email and mobile number
+    email: z.preprocess(
+        (value) => (typeof value === 'string' ? value.trim().toLowerCase() || undefined : value),
+        z.string().max(80, 'Email can be up to 80 characters').email('Please enter a valid email').optional()
+    ),
+    mobileNumber: z.preprocess(
+        (value) => (typeof value === 'string' ? value.replace(/[\s-]/g, '') || undefined : value),
+        z.string().regex(/^\d{10}$/, 'Please enter a valid 10-digit mobile number').optional()
     ),
     serviceType: z.preprocess(
         (value) => value === '' ? undefined : value,
@@ -85,12 +96,34 @@ const BANK_FIELDS = {
     ),
 }
 
+// Every field is optional: only the ones sent are changed (blank counts as not sent). Which ones a customer may
+// change depends on the account (see USER_FIELDS / PARTNER_ONLY_FIELDS).
 const updateProfileSchema = z.object({
     ...deviceFields,
     ...PROFILE_FIELDS,
     ...contactAndAddressFields,
+    // The city (wl_cities ID) and its country (wl_countries ID), always sent together.
+    // "state" and "country" are the older names for the same two fields.
+    cityId: z.preprocess(
+        (value) => (typeof value === 'string' && !value.trim() ? undefined : value),
+        z.coerce.number({ error: 'City must be a city ID' }).int('City must be a city ID').positive('City must be a city ID').optional()
+    ),
+    countryId: z.preprocess(
+        (value) => (typeof value === 'string' && !value.trim() ? undefined : value),
+        z.coerce.number({ error: 'Country must be a country ID' }).int('Country must be a country ID').positive('Country must be a country ID').optional()
+    ),
     ...BANK_FIELDS,
 }).strict()
+
+// Users (customer_type 2) edit only what the "Edit Profile" screen shows: photo (the logo file), name, phone, email
+// and gender. contactNumber is accepted as another name for the phone.
+const USER_FIELDS = new Set(['name', 'mobileNumber', 'contactNumber', 'email', 'gender'])
+// Login email and account mobile can only be changed by Users here; the partner form keeps its fields
+const PARTNER_EXCLUDED_FIELDS = new Set(['email', 'mobileNumber'])
+// The ones that move the address on the map (contact numbers don't)
+const LOCATION_FIELDS = ['address', 'location', 'pinCode', 'countryId', 'country', 'cityId', 'state']
+
+const sentFields = (d) => Object.keys(d).filter((key) => !(key in deviceFields) && d[key] !== undefined)
 
 const ACCOUNT_TYPE_LABELS = { savings: 'Savings', current: 'Current' }
 
@@ -165,10 +198,14 @@ const buildProfile = async (req, customerId) => {
     const countryName = countryId ? names.countryName : address.country
     const stateName = cityId ? names.cityName : address.state
 
-    const contactNumber = address.mobile || customer.mobileNumber
-    const additionalContactNumbers = address.additionalNumbers ? address.additionalNumbers.split(',') : []
-
     const isSalonPartner = customer.customerType === '1'
+
+    // Partners: the salon's contact number (address book), else the account's. Users: the account mobile, which
+    // "Edit Profile" changes.
+    const contactNumber = customer.customerType === '2'
+        ? customer.mobileNumber || address.mobile
+        : address.mobile || customer.mobileNumber
+    const additionalContactNumbers = address.additionalNumbers ? address.additionalNumbers.split(',') : []
 
     // Bookings: a User's own (the "All" tab of My Bookings); a Salon Partner's, the bookings made at their salon
     const bookingCounts = isSalonPartner
@@ -262,49 +299,95 @@ const updateProfile = async (req, res) => {
     if (!parsed.success) return sendValidationError(res, parsed.error)
 
     const d = parsed.data
+    const fail = (message, field) => res.status(200).json({ success: false, message, ...(field && { field }) })
+
+    // cityId / countryId and their older names "state" / "country" are the same fields
+    if (d.cityId !== undefined && d.state !== undefined && d.cityId !== d.state) {
+        return fail('Send the city once (cityId).', 'cityId')
+    }
+    if (d.countryId !== undefined && d.country !== undefined && d.countryId !== d.country) {
+        return fail('Send the country once (countryId).', 'countryId')
+    }
+    const cityId = d.cityId ?? d.state
+    const countryId = d.countryId ?? d.country
 
     let logoName = null
     if (req.file) {
         const ext = detectImageExt(req.file.buffer)
-        if (!ext) {
-            return res.status(200).json({ success: false, message: 'Logo must be a PNG or JPG image' })
-        }
+        if (!ext) return fail('Logo must be a PNG or JPG image', 'logo')
         logoName = crypto.randomBytes(12).toString('hex') + ext
     }
 
-    const customerValues = {
-        firstName: d.name,
-        gender: d.gender,
-        salonName: d.salonName,
-        serviceType: d.serviceType,
-        ...(logoName && { customerPhoto: logoName }),
-    }
-    const addressValues = toAddressColumns(d)
-    const bankValues = Object.fromEntries(Object.keys(BANK_FIELDS).map((key) => [key, d[key]]))
     const hasValue = (values) => Object.values(values).some((value) => value !== undefined)
-
-    if (!hasValue(customerValues) && !hasValue(addressValues) && !hasValue(bankValues)) {
-        return res.status(200).json({ success: false, message: 'Please change at least one field.' })
-    }
 
     try {
         const customer = await findLoggedInCustomer(req, res, d)
         if (!customer) return
 
+        const isUser = customer.customerType === '2'
+        const sent = sentFields(d)
+
+        // What this account may change: Users only the "Edit Profile" screen's fields, everyone else the full form
+        const notAllowed = sent.find((key) => (isUser ? !USER_FIELDS.has(key) : PARTNER_EXCLUDED_FIELDS.has(key)))
+        if (notAllowed) {
+            return fail(isUser
+                ? 'Only your photo, name, phone, email and gender can be changed here.'
+                : `${notAllowed === 'email' ? 'Email' : 'Mobile number'} can't be changed here.`, notAllowed)
+        }
+        if (isUser && d.mobileNumber !== undefined && d.contactNumber !== undefined && d.mobileNumber !== d.contactNumber) {
+            return fail('Send the phone number once (mobileNumber).', 'mobileNumber')
+        }
+
         const previous = await authModel.findProfile(customer.customerId)
 
-        // The city (state) must belong to the country. Whichever of the two isn't sent is taken from the saved address.
-        let place = { country: null, city: null }
-        if (d.country !== undefined || d.state !== undefined) {
-            const saved = await addressModel.findDefaultAddress(customer.customerId)
-            const countryId = d.country ?? savedId(saved?.country)
-            const cityId = d.state ?? (d.country !== undefined ? savedId(saved?.state) : null)
-            place = await checkCountryAndCity(countryId, cityId)
-            if (place.error) {
-                // A new country with the old city: ask for a city of the new country
-                const message = d.state === undefined && place.field === 'state' ? 'Please select a city in the selected country.' : place.error
-                return res.status(200).json({ success: false, message, field: place.field })
+        // Only what was sent; anything left out keeps its saved value
+        const customerValues = isUser
+            ? {
+                firstName: d.name,
+                gender: d.gender,
+                mobileNumber: d.mobileNumber ?? d.contactNumber,
+                userName: d.email,
+                ...(logoName && { customerPhoto: logoName }),
             }
+            : {
+                firstName: d.name,
+                gender: d.gender,
+                salonName: d.salonName,
+                serviceType: d.serviceType,
+                ...(logoName && { customerPhoto: logoName }),
+            }
+        const addressValues = isUser ? {} : toAddressColumns({ ...d, state: undefined, country: undefined })
+        const bankValues = isUser ? {} : Object.fromEntries(Object.keys(BANK_FIELDS).map((key) => [key, d[key]]))
+
+        // The login email and mobile number belong to one account only
+        if (customerValues.userName !== undefined) {
+            const owner = await authModel.findByEmail(customerValues.userName)
+            if (owner && owner.customerId !== customer.customerId) return fail('This email is already registered with another account.', 'email')
+        }
+        if (customerValues.mobileNumber !== undefined) {
+            const owner = await authModel.findByMobile(customerValues.mobileNumber)
+            if (owner && owner.customerId !== customer.customerId) {
+                return fail('This mobile number is already registered with another account.', d.mobileNumber !== undefined ? 'mobileNumber' : 'contactNumber')
+            }
+        }
+
+        // City and country come as a pair: the country is looked up in wl_countries, the city in wl_cities, both must
+        // be active and the city must be in that country. Both are saved as IDs (state = city, country = country).
+        if (!isUser && (cityId !== undefined || countryId !== undefined)) {
+            if (countryId === undefined) return fail('Please select a country.', 'countryId')
+            if (cityId === undefined) return fail('Please select a city.', 'cityId')
+
+            const [country, city] = await Promise.all([geoModel.findActiveCountry(countryId), geoModel.findActiveCity(cityId)])
+            if (!country) return fail('Country not found.', 'countryId')
+            if (!city) return fail('City not found.', 'cityId')
+            if (city.countryId !== country.countryId) return fail('The selected city does not belong to the selected country.', 'cityId')
+
+            addressValues.state = String(city.cityId)
+            addressValues.country = String(country.countryId)
+        }
+
+        if (!hasValue(customerValues) && !hasValue(addressValues) && !hasValue(bankValues)) {
+            return fail('Please change at least one field.')
         }
 
         if (logoName) {
@@ -333,8 +416,9 @@ const updateProfile = async (req, res) => {
                 })
             }
 
-            // The changed address is found on the map again (Nearby Salons); never fails the update
-            await updateAddressCoordinates(savedAddressId)
+            // A moved address is found on the map again (Nearby Salons); never fails the update. A change of
+            // contact numbers alone keeps the saved position.
+            if (LOCATION_FIELDS.some((key) => d[key] !== undefined)) await updateAddressCoordinates(savedAddressId)
 
             const order = await membershipModel.findActiveMembership(customer.customerId)
             const saved = order && await addressModel.findDefaultAddress(customer.customerId)

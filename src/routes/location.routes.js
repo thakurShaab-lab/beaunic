@@ -7,7 +7,7 @@ const { parsePayload } = require('../middleware/payload.middleware')
 const router = express.Router()
 
 router.post('/list', parsePayload(), deviceAuthMiddleware, getLocations)
-router.post('/save', jwtAuthMiddleware, parsePayload(), deviceAuthMiddleware, saveLocation)
+router.post('/save', parsePayload(), deviceAuthMiddleware, saveLocation)
 // Country and city dropdowns: Salon Partners only (logged in)
 router.post('/countries', jwtAuthMiddleware, parsePayload(), deviceAuthMiddleware, listCountries)
 router.post('/cities', jwtAuthMiddleware, parsePayload(), deviceAuthMiddleware, listCities)

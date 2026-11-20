@@ -19,10 +19,15 @@ const REVIEW_TYPES = {
     product: 'Product Feedback',
 }
 
-// Each type's lookups. Employee and product have no tables yet, so they can't be reviewed until those exist.
+// What reviewForId is for each type, and how it is looked up:
+//   salon -> a salon ID (wl_customers), service -> a service ID (wl_services),
+//   employee -> an employee ID (wl_employees), product -> a service ID (wl_services)
+// Each lookup returns { itemId, itemName, salonId, salonName } of an active item at an active salon.
 const REVIEWABLE = {
-    salon: { findOne: reviewModel.findReviewableSalon, notFound: 'Salon not found.' },
-    service: { findOne: reviewModel.findReviewableService, notFound: 'Service not found.' },
+    salon: { findOne: (id) => reviewModel.findReviewableSalon(id), notFound: 'Salon not found.' },
+    service: { findOne: (id) => reviewModel.findReviewableService(id), notFound: 'Service not found.' },
+    employee: { findOne: (id) => reviewModel.findReviewableEmployee(id), notFound: 'Employee not found.' },
+    product: { findOne: (id) => reviewModel.findReviewableService(id), notFound: 'Service not found.' },
 }
 
 const deviceFields = {
@@ -41,6 +46,12 @@ const addReviewSchema = z.object({
     reviewType,
     // Optional: blank, null or missing saves general feedback for the review type
     reviewForId: z.coerce.number({ error: 'Review for ID must be a number' }).int().positive('Review for ID must be a number').optional(),
+    // The salon of the reviewed item. Required with a service / employee / product reviewForId, which must belong to
+    // it; for a salon review it is the salon itself (same as reviewForId). Blank, null or missing = not sent.
+    salonId: z.preprocess(
+        (value) => (typeof value === 'string' && !value.trim() ? undefined : value ?? undefined),
+        z.coerce.number({ error: 'Salon ID must be a number' }).int('Salon ID must be a number').positive('Salon ID must be a number').optional()
+    ),
     rating: z.coerce.number({ error: 'Please tap a star to rate' })
         .int('Rating must be a whole number from 1 to 5')
         .min(1, 'Please tap a star to rate')
@@ -69,9 +80,7 @@ const findUser = async (req, res, data) => {
     return customer
 }
 
-const notAvailable = (type) => `${REVIEW_TYPES[type].replace(' Feedback', '')} reviews are not available yet.`
-
-// "Spa Pedicure · Glow Studio" for a service, the salon name for a salon
+// "Spa Pedicure · Glow Studio" for a service / product, "Ravi Kumar · Glow Studio" for an employee, the salon name for a salon
 const itemTitle = (itemName, salonName) => [itemName, salonName].filter(Boolean).filter((v, i, all) => all.indexOf(v) === i).join(' · ')
 
 const formatReview = (review) => ({
@@ -82,8 +91,14 @@ const formatReview = (review) => ({
     reviewForId: review.reviewForId || null,
     salonId: review.salonId || null,
     salonName: review.salonName,
-    title: (review.reviewType === 'service' ? itemTitle(review.serviceName, review.salonName) : itemTitle(review.salonName))
-        || REVIEW_TYPES[review.reviewType],
+    // The reviewed service (service / product reviews) or employee (employee reviews)
+    serviceName: review.reviewType === 'service' || review.reviewType === 'product' ? review.serviceName ?? null : null,
+    employeeName: review.reviewType === 'employee' ? review.employeeName ?? null : null,
+    title: itemTitle(
+        review.reviewType === 'employee' ? review.employeeName
+            : review.reviewType === 'salon' ? null : review.serviceName,
+        review.salonName
+    ) || REVIEW_TYPES[review.reviewType],
     rating: Number(review.rating),
     review: review.reviewText,
     reviewDate: formatDate(review.reviewAddedDate),
@@ -103,17 +118,35 @@ const addReview = async (req, res) => {
         const customer = await findUser(req, res, d)
         if (!customer) return
 
-        // Without reviewForId the review is general feedback for its type, saved with review_for_id / salon_id 0.
-        // With one, the salon or service must exist; employees and products can't be looked up yet.
-        let item = null
-        if (d.reviewForId !== undefined) {
-            if (!REVIEWABLE[d.reviewType]) {
-                return res.status(200).json({ success: false, message: notAvailable(d.reviewType) })
-            }
+        const fail = (message, field) => res.status(200).json({ success: false, message, field })
 
-            item = await REVIEWABLE[d.reviewType].findOne(d.reviewForId)
-            if (!item) {
-                return res.status(200).json({ success: false, message: REVIEWABLE[d.reviewType].notFound })
+        // A salon review is about the salon itself: salonId and reviewForId both name it, so they must agree
+        const reviewForId = d.reviewType === 'salon' ? d.reviewForId ?? d.salonId : d.reviewForId
+        if (d.reviewType === 'salon' && d.reviewForId !== undefined && d.salonId !== undefined && d.reviewForId !== d.salonId) {
+            return fail('Salon ID and review for ID must be the same salon.', 'salonId')
+        }
+
+        // A service / employee / product review of a particular item needs the salon it belongs to
+        if (d.reviewType !== 'salon' && reviewForId !== undefined && d.salonId === undefined) {
+            return fail('Salon ID is required', 'salonId')
+        }
+
+        // The salon must be an active one
+        let salon = null
+        if (d.salonId !== undefined) {
+            salon = await reviewModel.findReviewableSalon(d.salonId)
+            if (!salon) return fail('Salon not found.', 'salonId')
+        }
+
+        // Without reviewForId the review is general feedback for its type, saved with review_for_id 0 (and the salon,
+        // when one was sent). With one, it must be an active item of its type (see REVIEWABLE) at that salon.
+        let item = null
+        if (reviewForId !== undefined) {
+            item = await REVIEWABLE[d.reviewType].findOne(reviewForId)
+            if (!item) return fail(REVIEWABLE[d.reviewType].notFound, 'reviewForId')
+
+            if (salon && item.salonId !== salon.salonId) {
+                return fail(`This ${d.reviewType === 'employee' ? 'employee' : 'service'} does not belong to the selected salon.`, 'reviewForId')
             }
         }
 
@@ -122,7 +155,7 @@ const addReview = async (req, res) => {
             customerId: customer.customerId,
             reviewType: d.reviewType,
             reviewForId: item ? item.itemId : 0,
-            salonId: item ? item.salonId : 0,
+            salonId: item ? item.salonId : salon ? salon.salonId : 0,
             rating: d.rating,
             reviewText: d.review,
             status: '1',
@@ -138,8 +171,9 @@ const addReview = async (req, res) => {
             data: convertNulls(formatReview({
                 ...review,
                 reviewId,
-                salonName: item ? item.salonName : null,
-                serviceName: item && d.reviewType === 'service' ? item.itemName : null,
+                salonName: item ? item.salonName : salon ? salon.salonName : null,
+                serviceName: item && (d.reviewType === 'service' || d.reviewType === 'product') ? item.itemName : null,
+                employeeName: item && d.reviewType === 'employee' ? item.itemName : null,
             })),
         })
     } catch (err) {
@@ -262,16 +296,17 @@ const reviewTag = (row) => {
     if (row.reviewType === 'salon') return 'Salon visit'
     if (row.reviewType === 'service') return row.serviceName || 'Service'
     if (row.reviewType === 'employee') return row.employeeName || 'Employee'
-    return 'Product order'
+    // A product review's reviewForId is a service ID
+    return row.serviceName || 'Product order'
 }
 
-// The reviewed item: the salon itself, one of its services / employees, or a product (no products table yet)
+// The reviewed item: the salon itself, one of its services / employees, or a product (reviewForId = a service ID)
 const reviewedItem = (row, salon) => {
     const id = row.reviewForId || null
     if (row.reviewType === 'salon') return { type: 'salon', id: salon.salonId, name: salon.salonName }
     if (row.reviewType === 'service') return { type: 'service', id, name: row.serviceName }
     if (row.reviewType === 'employee') return { type: 'employee', id, name: row.employeeName, designation: row.employeeDesignation }
-    return { type: 'product', id, name: null }
+    return { type: 'product', id, name: row.serviceName || null }
 }
 
 const formatPartnerReview = (row, photoUrl, salon) => {

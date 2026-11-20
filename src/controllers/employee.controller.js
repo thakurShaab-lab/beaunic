@@ -75,6 +75,8 @@ const deleteEmployeeSchema = z.object({
 
 const listEmployeesSchema = z.object({
     ...deviceFields,
+    // Users: required, a salon they have booked at. Salon Partners always get their own salon's (not needed).
+    salonId: idField('Salon ID').optional(),
     // Optional: one employee
     employeeId: idField('Employee ID').optional(),
 }).strict()
@@ -92,7 +94,7 @@ const ASSIGN_ERRORS = {
     same_employee: 'This employee is already assigned to this booking.',
 }
 
-// Employees are only for Salon Partners (customer_type 1)
+// Managing employees is only for Salon Partners (customer_type 1); /employee/list is also open to Users
 const findSalonPartner = async (req, res, data) => {
     const customer = await findLoggedInCustomer(req, res, data)
     if (!customer) return null
@@ -143,6 +145,8 @@ const STATUS_LABELS = { 1: 'Active', 0: 'Inactive' }
 // One employee card; imageUrl comes from photoUrl (null when there's no photo, and the app shows the initials)
 const formatEmployee = (employee, imageUrl, upcomingBookings) => ({
     employeeId: employee.employeeId,
+    // The salon the employee works for (the partner's own)
+    salonId: employee.salonId,
     employeeName: employee.employeeName,
     designation: employee.designation,
     salary: Number(employee.salary),
@@ -155,6 +159,45 @@ const formatEmployee = (employee, imageUrl, upcomingBookings) => ({
     ...(upcomingBookings !== undefined && { upcomingBookings }),
     addedDate: employee.employeeAddedDate,
 })
+
+// What a User sees of an employee: no salary, status or booking counts
+const formatPublicEmployee = (employee, imageUrl) => ({
+    employeeId: employee.employeeId,
+    employeeName: employee.employeeName,
+    designation: employee.designation,
+    initials: initialsOf(employee.employeeName),
+    imageUrl,
+})
+
+// /employee/list for a User: the employees of the salon sent (salonId, required), which must be one they have
+// booked at (any booking of theirs). employeeId (optional) narrows it to one employee of that salon.
+const listSalonEmployeesForUser = async (req, res, { customerId, salonId, employeeId }) => {
+    if (salonId === undefined) {
+        return res.status(200).json({ success: false, message: 'Salon ID is required', field: 'salonId' })
+    }
+
+    // A salon the customer hasn't booked at is refused, so its staff can't be browsed
+    if (!(await employeeModel.hasBookingAtSalon(customerId, salonId))) {
+        return res.status(200).json({ success: false, message: 'You can only see the employees of salons you have booked.', field: 'salonId' })
+    }
+
+    const rows = (await employeeModel.findEmployeesOfBookedSalons(customerId, { salonId }))
+        .filter((row) => employeeId === undefined || row.employeeId === employeeId)
+    if (employeeId !== undefined && !rows.length) return sendNotFound(res)
+
+    const imageUrls = await Promise.all(rows.map((row) => photoUrl(req, row.employeeImage)))
+    const employees = rows.map((row, i) => ({ ...formatPublicEmployee(row, imageUrls[i]), salonId: row.salonId, salonName: row.salonName }))
+
+    if (employeeId !== undefined) {
+        return res.status(200).json({ success: true, message: 'Employee fetched successfully', data: convertNulls({ employee: employees[0] }) })
+    }
+
+    return res.status(200).json({
+        success: true,
+        message: employees.length ? 'Employees fetched successfully' : 'No employees found',
+        data: convertNulls({ salonId, total: employees.length, employees }),
+    })
+}
 
 // "Add Employee"
 const createEmployee = async (req, res) => {
@@ -300,10 +343,17 @@ const listEmployees = async (req, res) => {
     if (!parsed.success) return sendValidationError(res, parsed.error)
 
     try {
-        const partner = await findSalonPartner(req, res, parsed.data)
-        if (!partner) return
+        const customer = await findLoggedInCustomer(req, res, parsed.data)
+        if (!customer) return
 
-        const salonId = partner.customerId
+        // Users (customer_type 2): the active employees of salons they have booked at, without salary or booking counts
+        if (customer.customerType === '2') return listSalonEmployeesForUser(req, res, { ...parsed.data, customerId: customer.customerId })
+
+        if (customer.customerType !== '1') {
+            return res.status(200).json({ success: false, message: 'This feature is only available for Salon Partners and Users.' })
+        }
+
+        const salonId = customer.customerId
 
         if (parsed.data.employeeId !== undefined) {
             const employee = await employeeModel.findSalonEmployee(salonId, parsed.data.employeeId)
@@ -327,6 +377,7 @@ const listEmployees = async (req, res) => {
             success: true,
             message: rows.length ? 'Employees fetched successfully' : 'No employees added yet',
             data: convertNulls({
+                salonId,
                 total: rows.length,
                 employees: rows.map((row, i) => formatEmployee(row, imageUrls[i], upcoming.get(row.employeeId) || 0)),
             }),
