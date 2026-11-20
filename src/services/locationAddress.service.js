@@ -27,6 +27,12 @@ const dedupe = (values) => {
 
 const fullAddress = (parts) => dedupe(parts).join(', ')
 
+// The two lines of a recent location: "Dildarnagar" / "Ghazipur, Uttar Pradesh 232326"
+const placeLabel = (title, area, state, pinCode) => ({
+    title: cut(title, 100),
+    subtitle: cut(dedupe([same(area, title) ? null : area, [state, pinCode].filter(Boolean).join(' ')]).join(', '), 255),
+})
+
 const LOCATION_ERRORS = {
     location: 'Location not found or not available.',
     city: 'The city of this location is not available.',
@@ -84,6 +90,7 @@ const addressFromLocation = async (locationId) => {
             locationFound: found,
             fullAddress: fullAddress([row.locationName, cityName, stateName, pinCode, row.countryName]),
         },
+        label: placeLabel(row.locationName, cityName, stateName, pinCode),
     }
 }
 
@@ -158,7 +165,8 @@ const addressFromCoordinates = async (latitude, longitude) => {
             locationFound: true,
             fullAddress: fullAddress([address, town, c.state, c.postalCode, country ? country.countryName : c.country]),
         },
+        label: placeLabel(town, c.district, c.state, c.postalCode),
     }
 }
 
-module.exports = { addressFromLocation, addressFromCoordinates, cityTitle, cityHint, LOCATION_ERRORS, REVERSE_ERRORS }
+module.exports = { addressFromLocation, addressFromCoordinates, cityTitle, cityHint, fullAddress, LOCATION_ERRORS, REVERSE_ERRORS }

@@ -83,4 +83,13 @@ const deviceAuthMiddleware = async (req, res, next) => {
   }
 }
 
-module.exports = { deviceAuthMiddleware, jwtAuthMiddleware }
+// Login optional: with no token the request goes on as a guest (req.user unset); a token that is sent must be
+// valid, exactly as with jwtAuthMiddleware
+const optionalJwtAuthMiddleware = (req, res, next) => {
+  // "Bearer" with nothing after it counts as no token
+  const token = (req.headers.authorization || '').trim().replace(/^Bearer(\s+|$)/i, '').trim()
+  if (!token) return next()
+  return jwtAuthMiddleware(req, res, next)
+}
+
+module.exports = { deviceAuthMiddleware, jwtAuthMiddleware, optionalJwtAuthMiddleware }

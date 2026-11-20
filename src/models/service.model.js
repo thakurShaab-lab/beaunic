@@ -79,6 +79,8 @@ const findCustomerServicesWithCategory = async (
     db
         .select({
             salonName: salon.salonName,
+            // wl_customers.salon_type of the salon: salon / home_service
+            salonType: salon.serviceType,
             serviceId: wlServices.serviceId,
             customerId: wlServices.customerId,
             membershipId: wlServices.membershipId,

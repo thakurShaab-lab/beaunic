@@ -7,6 +7,8 @@ const { validateRequestDevice } = require('./device&app.controller')
 const { findLoggedInCustomer } = require('./profile.controller')
 const { convertNulls } = require('../utils/convertNulls')
 const locationAddress = require('../services/locationAddress.service')
+const recentLocation = require('../services/recentLocation.service')
+const recentLocationModel = require('../models/recentLocation.model')
 
 const SEARCH_LIMIT = 20
 
@@ -30,18 +32,20 @@ const latitude = z.coerce.number({ error: 'Latitude must be a number' })
 const longitude = z.coerce.number({ error: 'Longitude must be a number' })
     .min(-180, 'Longitude must be between -180 and 180').max(180, 'Longitude must be between -180 and 180')
 
-// Two ways of choosing, one per request: locationId (the serviceable locations dropdown / search) or
-// latitude + longitude (Use Current Location). The address itself (address, city, state, PIN code, country) is
-// worked out on the server, so it isn't accepted from the app.
+// Three ways of choosing, one per request: locationId (the serviceable locations dropdown / search),
+// latitude + longitude (Use Current Location) or recentLocationId (Recent Locations). The address itself (address,
+// city, state, PIN code, country) is worked out on the server, so it isn't accepted from the app.
 const saveLocationSchema = z.object({
     ...deviceFields,
     locationId: z.coerce.number({ error: 'Location ID must be a number' }).int('Location ID must be a number').positive('Location ID must be a number').optional(),
     latitude: latitude.optional(),
     longitude: longitude.optional(),
+    recentLocationId: z.coerce.number({ error: 'Recent location ID must be a number' }).int('Recent location ID must be a number').positive('Recent location ID must be a number').optional(),
 }).strict().superRefine((d, ctx) => {
     const hasPoint = d.latitude !== undefined || d.longitude !== undefined
-    if (d.locationId !== undefined && hasPoint) {
-        ctx.addIssue({ code: 'custom', path: ['locationId'], message: 'Send either a location or your current location, not both.' })
+    const chosen = [d.locationId !== undefined, hasPoint, d.recentLocationId !== undefined].filter(Boolean).length
+    if (chosen > 1) {
+        ctx.addIssue({ code: 'custom', path: ['locationId'], message: 'Send only one of: a location, your current location or a recent location.' })
         return
     }
     // The current location is a pair
@@ -152,33 +156,69 @@ const saveLocation = async (req, res) => {
 
     const d = parsed.data
 
-    if (d.locationId === undefined && d.latitude === undefined) {
+    if (d.locationId === undefined && d.latitude === undefined && d.recentLocationId === undefined) {
         return res.status(200).json({ success: false, message: 'Please select a location or share your current location.' })
     }
 
     try {
-        const customer = await findUser(req, res, d)
-        if (!customer) return
+        // Login is optional. Logged in: the User from the token. Not logged in: the User of this app_id + device_id
+        // in wl_customers; when the device has none, one is created below (after the location is found), so the
+        // location is always saved to an account. A Salon Partner row on the same device is never used.
+        const isGuest = !req.user
+        let customer
+        if (isGuest) {
+            if (d.recentLocationId !== undefined) {
+                return res.status(200).json({ success: false, message: 'Please log in to use your recent locations.', field: 'recentLocationId' })
+            }
+            customer = await authModel.findUserByDevice(String(d.app_id).trim(), d.device_id.trim())
+        } else {
+            customer = await findUser(req, res, d)
+            if (!customer) return
+        }
 
-        // The whole address, from our tables (locationId) or from the map (latitude + longitude). Nothing is saved
-        // when the location isn't available or no address is found at the position.
-        const result = d.locationId !== undefined
-            ? await locationAddress.addressFromLocation(d.locationId)
-            : await locationAddress.addressFromCoordinates(d.latitude, d.longitude)
+        // The whole address, from our tables (locationId), from the map (latitude + longitude) or as it was saved
+        // before (recentLocationId, one of the customer's own). Nothing is saved when the location isn't available or
+        // no address is found at the position.
+        let result
+        if (d.recentLocationId !== undefined) {
+            const recent = await recentLocationModel.findRecentLocation(customer.customerId, d.recentLocationId)
+            if (!recent) return res.status(200).json({ success: false, message: 'Recent location not found.', field: 'recentLocationId' })
+            result = recentLocation.resultFromRecent(recent)
+        } else {
+            result = d.locationId !== undefined
+                ? await locationAddress.addressFromLocation(d.locationId)
+                : await locationAddress.addressFromCoordinates(d.latitude, d.longitude)
+        }
 
         if (result.error) {
             return res.status(200).json({ success: false, message: result.message, field: result.field })
         }
 
+        // A device seen for the first time: a User row for it (wl_customers), then its address book entry below
+        const isNewCustomer = !customer
+        if (isNewCustomer) {
+            const customerId = await authModel.createDeviceUser({
+                appId: String(d.app_id).trim(),
+                deviceId: d.device_id.trim(),
+                appType: req.device?.app_type,
+                ipAddress: req.ip,
+            })
+            customer = { customerId, firstName: null }
+        }
+
         // The new location replaces the customer's default address completely, so nothing of an older one is left
+        // (an existing entry is updated; one is only added when the customer has none)
         const addressId = await saveSelectedLocation(customer, result.values)
+
+        // ...and goes to the top of Recent Locations
+        await recentLocation.rememberLocation(customer.customerId, result, authModel.nowString())
 
         return res.status(200).json({
             success: true,
             message: result.place.locationFound
                 ? 'Location saved successfully'
                 : 'Location saved successfully, but it could not be found on the map',
-            data: convertNulls({ addressId, ...result.place }),
+            data: convertNulls({ customerId: customer.customerId, isNewCustomer, addressId, isSaved: true, ...result.place }),
         })
     } catch (err) {
         console.error('Save location error:', err)
@@ -186,4 +226,46 @@ const saveLocation = async (req, res) => {
     }
 }
 
-module.exports = { getLocations, saveLocation }
+const DEFAULT_RECENT_LIMIT = 5
+
+// "Recent Locations": up to `limit` (default 5) of the customer's last chosen locations, newest first.
+// Tapping one calls /location/save with its recentLocationId.
+const recentLocationsSchema = z.object({
+    ...deviceFields,
+    limit: z.coerce.number({ error: 'Limit must be a number' })
+        .int('Limit must be a whole number')
+        .min(1, 'Limit must be 1 or more')
+        .max(recentLocationModel.KEEP_PER_CUSTOMER, `Limit can be at most ${recentLocationModel.KEEP_PER_CUSTOMER}`)
+        .optional(),
+}).strict()
+
+const getRecentLocations = async (req, res) => {
+    if (!(await validateRequestDevice(req, res))) return
+
+    const parsed = recentLocationsSchema.safeParse(req.body)
+
+    if (!parsed.success) return sendValidationError(res, parsed.error)
+
+    try {
+        const customer = await findUser(req, res, parsed.data)
+        if (!customer) return
+
+        const rows = await recentLocationModel.findRecentLocations(customer.customerId, parsed.data.limit ?? DEFAULT_RECENT_LIMIT)
+
+        return res.status(200).json({
+            success: true,
+            message: rows.length ? 'Recent locations fetched successfully' : 'No recent locations yet',
+            data: convertNulls({
+                title: 'Recent Locations',
+                total: rows.length,
+                // The first one is the location in use now
+                recentLocations: rows.map((row, index) => ({ ...recentLocation.formatRecentLocation(row), isCurrent: index === 0 })),
+            }),
+        })
+    } catch (err) {
+        console.error('Recent locations error:', err)
+        return res.status(200).json({ success: false, message: 'Something went wrong' })
+    }
+}
+
+module.exports = { getLocations, saveLocation, getRecentLocations }

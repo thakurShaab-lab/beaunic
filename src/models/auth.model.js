@@ -1,6 +1,6 @@
 
 const crypto = require("crypto")
-const { eq, or, and } = require("drizzle-orm")
+const { eq, or, and, ne, desc } = require("drizzle-orm")
 const db = require("../config/drizzle")
 const { wlCustomers } = require("../schema/wl-customers")
 const { wlCustomersAddressBook } = require("../schema/wl-customers-address-book")
@@ -46,6 +46,52 @@ const create = async ({ deviceId, appId, appType, userName, passwordHash, firstN
         salonName,
         loginType: LOGIN_TYPE[customerType],
         isVerified: "1",
+        actkey: crypto.randomBytes(16).toString("hex"),
+        ipAddress: String(ipAddress || "").slice(0, 25),
+        accountCreatedDate: nowString(),
+    })
+
+    return result.insertId
+}
+
+// The User (customer_type 2) of a device for /location/save without login: the newest one with this app_id +
+// device_id that isn't deleted. Salon Partner rows on the same device are never returned (their address is the
+// salon's location). null when the device has no such User.
+const findUserByDevice = async (appId, deviceId) => {
+    const rows = await db
+        .select({
+            customerId: wlCustomers.customerId,
+            customerType: wlCustomers.customerType,
+            status: wlCustomers.status,
+            firstName: wlCustomers.firstName,
+        })
+        .from(wlCustomers)
+        .where(
+            and(
+                eq(wlCustomers.appId, appId),
+                eq(wlCustomers.deviceId, deviceId),
+                eq(wlCustomers.customerType, "2"),
+                ne(wlCustomers.status, "2")
+            )
+        )
+        .orderBy(desc(wlCustomers.customerId))
+        .limit(1)
+
+    return rows[0] || null
+}
+
+// A User row for a device that has none yet (/location/save without login): only app_id / device_id / app_type are
+// known. user_name and password stay empty (it can't be logged into); status 0 (not an activated account).
+const createDeviceUser = async ({ appId, deviceId, appType, ipAddress }) => {
+    const [result] = await db.insert(wlCustomers).values({
+        appId,
+        deviceId,
+        appType: appType || null,
+        userName: "",
+        password: "",
+        customerType: "2",
+        loginType: LOGIN_TYPE["2"],
+        status: "0",
         actkey: crypto.randomBytes(16).toString("hex"),
         ipAddress: String(ipAddress || "").slice(0, 25),
         accountCreatedDate: nowString(),
@@ -249,6 +295,8 @@ module.exports = {
     findPasswordHash,
     updatePassword,
     findByIdAndDevice,
+    findUserByDevice,
+    createDeviceUser,
     hasAddress,
     findByEmailOrMobile,
     create,

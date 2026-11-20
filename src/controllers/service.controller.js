@@ -26,8 +26,11 @@ const SERVICE_IMAGE_FOLDER = 'services'
 // UPLOAD_DIR is the folder served at /uploaded_files, so images are saved straight under it
 const SERVICE_IMAGE_DIR = path.join(env.uploadDir, SERVICE_IMAGE_FOLDER)
 
-// Image tiles on the screen: Cover plus up to two more, saved in wl_services_media
-const MAX_IMAGES = 3
+// /service/list: the salon's type (wl_customers.salon_type) as shown on each service
+const SALON_TYPE_LABELS = { salon: 'Salon', home_service: 'Home Service' }
+
+// Images are saved in wl_services_media: one cover (is_default Y) and any number of others. Per request the
+// route accepts one coverImage and up to 5 images.
 
 // Blank form fields are ignored, so an edit clears a saved value by naming it here
 const REMOVABLE_FIELDS = ['price', 'description', 'duration']
@@ -394,23 +397,9 @@ const updateService = async (req, res) => {
         const oldCover = media.find((row) => row.isDefault === 'Y' && !removing.has(row.mediaId))
         if (images.cover && oldCover) removing.add(oldCover.mediaId)
 
-        // New images that don't fit replace the oldest non-cover images; removeMediaIds picks exactly which ones go
-        const overflow = media.filter((row) => !removing.has(row.mediaId)).length + images.all.length - MAX_IMAGES
-        if (overflow > 0) {
-            media
-                .filter((row) => row.isDefault !== 'Y' && !removing.has(row.mediaId))
-                .sort((a, b) => a.mediaId - b.mediaId)
-                .slice(0, overflow)
-                .forEach((row) => removing.add(row.mediaId))
-        }
-
+        // No limit on the number of images: new ones are added to those kept; only removeMediaIds (and a replaced
+        // cover) are removed
         const kept = media.filter((row) => !removing.has(row.mediaId))
-        if (kept.length + images.all.length > MAX_IMAGES) {
-            return res.status(200).json({
-                success: false,
-                message: `A service can have up to ${MAX_IMAGES} images. Remove one before adding another.`,
-            })
-        }
 
         // Keep exactly one cover: the new upload, the current cover, or else the first image left
         const now = authModel.nowString()
@@ -530,6 +519,9 @@ const listServices = async (req, res) => {
             is_favorite: favoriteIds.has(service.serviceId) ? 1 : 0,
             // The salon the service belongs to (both customer types)
             salon_id: service.customerId,
+            // Whether that salon is a salon or a home service: "salon" / "home_service", "Salon" / "Home Service"
+            salonType: service.salonType ?? null,
+            salonTypeLabel: SALON_TYPE_LABELS[service.salonType] ?? null,
             // Without salonId a User's list can mix salons, so each service says whose it is (needed for /service/details)
             ...(isUser && { salonId: service.customerId, salonName: service.salonName }),
         }))
