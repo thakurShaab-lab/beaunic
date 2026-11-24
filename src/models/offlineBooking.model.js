@@ -31,10 +31,15 @@ const findSalonOfflineBookings = async (salonId, { status, limit, offset }) =>
             slotDate: wlBookingSlots.slotDate,
             startTime: wlBookingSlots.startTime,
             endTime: wlBookingSlots.endTime,
+            // The payment as recorded on the confirmed booking (wl_bookings): Paid / Unpaid and cash / online
+            paymentStatus: wlBookings.paymentStatus,
+            bookingPaymentMode: wlBookings.paymentMode,
         })
         .from(o)
         .leftJoin(wlServices, eq(wlServices.serviceId, o.serviceId))
         .leftJoin(wlBookingSlots, eq(wlBookingSlots.slotId, o.slotId))
+        // Only this salon's booking (a draft has none yet)
+        .leftJoin(wlBookings, and(eq(wlBookings.bookingId, o.bookingId), eq(wlBookings.salonId, o.salonId)))
         .where(and(own(salonId), status ? eq(o.status, status) : undefined))
         .orderBy(desc(o.offlineBookingUpdatedDate), desc(o.offlineBookingId))
         .limit(limit)

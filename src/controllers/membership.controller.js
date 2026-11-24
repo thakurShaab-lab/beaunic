@@ -152,6 +152,7 @@ const purchaseMembership = async (req, res) => {
             property_count_rent: plan.propertyCountRent,
             property_count_land: plan.propertyCountLand,
             receive_date: authModel.nowString(),
+            type: 'Partner',
             membership_status: '1',
         })
 

@@ -496,8 +496,11 @@ const listOfflineBookings = handle('Offline bookings list', listSchema, async (r
         message: rows.length ? 'Offline bookings fetched successfully' : total ? 'No more offline bookings' : 'No offline bookings yet',
         data: convertNulls({
             selectedStatus: d.status ?? 'all',
-            offlineBookings: rows.map(({ offlineBooking, serviceName, slotDate, startTime, endTime }) => {
+            offlineBookings: rows.map(({ offlineBooking, serviceName, slotDate, startTime, endTime, paymentStatus, bookingPaymentMode }) => {
                 const steps = stepsOf(offlineBooking)
+                // "Cash" / "Online" once the booking is paid, from the mode its payment was made by (the booking's,
+                // else the one chosen at confirm); empty for drafts and unpaid bookings
+                const paidBy = paymentStatus === 'Paid' ? bookingPaymentMode || offlineBooking.paymentMode : null
                 return {
                     offlineBookingId: offlineBooking.offlineBookingId,
                     bookingId: offlineBooking.bookingId,
@@ -511,6 +514,7 @@ const listOfflineBookings = handle('Offline bookings list', listSchema, async (r
                     dateTimeLabel: offlineBooking.slotId && slotDate
                         ? `${dateParts(slotDate).label} · ${slotTimeLabel({ startTime, endTime })}`
                         : null,
+                    paymentMode: PAYMENT_MODES.find((mode) => mode.key === paidBy)?.label ?? null,
                 }
             }),
             pagination: { page, limit, total, totalPages, hasNextPage: page < totalPages },
