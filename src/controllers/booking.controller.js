@@ -2678,4 +2678,7 @@ module.exports = {
     recordBookingPayment,
     listSalonBookings,
     paymentModeOf,
+    // The invoice PDF and its link, also used for offline bookings (/booking/offline/details)
+    buildInvoice,
+    saveInvoicePdf,
 }

@@ -35,6 +35,7 @@ const homeRoutes = require('./src/routes/home.routes')
 const employeeRoutes = require('./src/routes/employee.routes')
 const shareRoutes = require('./src/routes/share.routes')
 const salonRoutes = require('./src/routes/salon.routes')
+const { bookingNumberMiddleware } = require('./src/middleware/bookingNumber.middleware')
 
 
 const app = express()
@@ -57,6 +58,8 @@ app.use(
 
 app.use(cors())
 app.use(express.json())
+// Every JSON response: bkNumber ("BK-<bookingId>") next to each bookingId
+app.use(bookingNumberMiddleware)
 
 app.use(
   morgan('combined', {

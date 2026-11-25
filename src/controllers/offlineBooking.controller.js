@@ -4,6 +4,7 @@ const authModel = require('../models/auth.model')
 const offlineBookingModel = require('../models/offlineBooking.model')
 const serviceModel = require('../models/service.model')
 const slotModel = require('../models/slot.model')
+const bookingModel = require('../models/booking.model')
 const { validateRequestDevice } = require('./device&app.controller')
 const { findLoggedInCustomer } = require('./profile.controller')
 const { salonNow, timeLabel, dateParts, hhmm } = require('./slot.controller')
@@ -406,12 +407,36 @@ const saveSlot = handle('Offline booking slot', slotSchema, async (req, res, sal
     return sendOfflineBooking(req, res, salonId, offlineBooking, 'Booking date and time saved')
 })
 
-// One offline booking with everything saved so far: resume at currentStep; step 4 shows "Order Summary"
+// The invoice of a confirmed offline booking: the same PDF and link as an app booking's (booking.controller), made
+// from its wl_bookings row. null for a draft (no booking yet). A PDF that can't be made only leaves the link empty.
+const invoiceOf = async (salonId, offlineBooking) => {
+    if (offlineBooking.status !== 'confirmed' || !offlineBooking.bookingId) return null
+
+    // Loaded here, not at the top: booking.controller is large and only needed for confirmed bookings
+    const { buildInvoice, saveInvoicePdf } = require('./booking.controller')
+    const booking = await bookingModel.findSalonBooking(salonId, offlineBooking.bookingId)
+    if (!booking) return null
+
+    const invoice = buildInvoice(booking)
+    let downloadUrl = null
+    try {
+        downloadUrl = await saveInvoicePdf(invoice, booking.bookingId)
+    } catch (err) {
+        console.error(`Offline booking ${offlineBooking.offlineBookingId} invoice PDF error:`, err)
+    }
+
+    return { invoiceNumber: invoice.invoiceNumber, label: 'Invoice', downloadUrl }
+}
+
+// One offline booking with everything saved so far: resume at currentStep; step 4 shows "Order Summary".
+// A confirmed one also has its invoice PDF link.
 const getOfflineBooking = handle('Offline booking details', offlineBookingSchema, async (req, res, salonId, d) => {
     const offlineBooking = await findOwnOfflineBooking(res, salonId, d.offlineBookingId)
     if (!offlineBooking) return
 
-    return sendOfflineBooking(req, res, salonId, offlineBooking, 'Offline booking fetched successfully')
+    return sendOfflineBooking(req, res, salonId, offlineBooking, 'Offline booking fetched successfully', {
+        invoice: await invoiceOf(salonId, offlineBooking),
+    })
 })
 
 // Why "CREATE ORDER" failed, and the step to go back to
@@ -496,8 +521,13 @@ const listOfflineBookings = handle('Offline bookings list', listSchema, async (r
         message: rows.length ? 'Offline bookings fetched successfully' : total ? 'No more offline bookings' : 'No offline bookings yet',
         data: convertNulls({
             selectedStatus: d.status ?? 'all',
-            offlineBookings: rows.map(({ offlineBooking, serviceName, slotDate, startTime, endTime, paymentStatus, bookingPaymentMode }) => {
+            offlineBookings: rows.map(({ offlineBooking, serviceName, slotDate, startTime, endTime, paymentStatus, bookingPaymentMode, bookingAmount, servicePrice }) => {
                 const steps = stepsOf(offlineBooking)
+                // Confirmed: the amount the booking charged. Draft: the chosen service's price now (none if no service
+                // is chosen yet, or its price isn't set)
+                const amount = offlineBooking.bookingId && bookingAmount !== null && bookingAmount !== undefined
+                    ? bookingAmount
+                    : offlineBooking.serviceId ? servicePrice : null
                 // "Cash" / "Online" once the booking is paid, from the mode its payment was made by (the booking's,
                 // else the one chosen at confirm); empty for drafts and unpaid bookings
                 const paidBy = paymentStatus === 'Paid' ? bookingPaymentMode || offlineBooking.paymentMode : null
@@ -514,6 +544,11 @@ const listOfflineBookings = handle('Offline bookings list', listSchema, async (r
                     dateTimeLabel: offlineBooking.slotId && slotDate
                         ? `${dateParts(slotDate).label} · ${slotTimeLabel({ startTime, endTime })}`
                         : null,
+                    price: amount === null || amount === undefined ? null : Number(amount),
+                    // "₹499"
+                    priceLabel: amount === null || amount === undefined ? null : rupees(amount),
+                    // Paid / Unpaid, as recorded on the booking; a draft isn't paid yet
+                    paymentStatus: paymentStatus || 'Unpaid',
                     paymentMode: PAYMENT_MODES.find((mode) => mode.key === paidBy)?.label ?? null,
                 }
             }),

@@ -34,6 +34,9 @@ const findSalonOfflineBookings = async (salonId, { status, limit, offset }) =>
             // The payment as recorded on the confirmed booking (wl_bookings): Paid / Unpaid and cash / online
             paymentStatus: wlBookings.paymentStatus,
             bookingPaymentMode: wlBookings.paymentMode,
+            // Price: what the confirmed booking charged, or (draft) the chosen service's current price
+            bookingAmount: wlBookings.totalAmount,
+            servicePrice: wlServices.servicePrice,
         })
         .from(o)
         .leftJoin(wlServices, eq(wlServices.serviceId, o.serviceId))

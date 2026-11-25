@@ -10,7 +10,6 @@ const locationAddress = require('../services/locationAddress.service')
 const recentLocation = require('../services/recentLocation.service')
 const recentLocationModel = require('../models/recentLocation.model')
 
-const SEARCH_LIMIT = 20
 
 const deviceFields = {
     app_id: z.union([z.string(), z.number()]),
@@ -25,6 +24,11 @@ const locationsSchema = z.object({
     ...deviceFields,
     locationId: locationIdFilter,
     location_id: locationIdFilter,
+    // Optional search: locations whose name (wl_localities.title) contains it. Blank / missing lists every location.
+    keyword: z.preprocess(
+        (value) => (typeof value === 'string' ? value.replace(/\s+/g, ' ').trim() || undefined : value ?? undefined),
+        z.string({ error: 'Keyword must be text' }).max(80, 'Keyword can be up to 80 characters').optional()
+    ),
 }).strict()
 
 const latitude = z.coerce.number({ error: 'Latitude must be a number' })
@@ -125,14 +129,20 @@ const getLocations = async (req, res) => {
             })
         }
 
-        const rows = await locationModel.findActiveLocations()
+        // Every active location, or those whose name matches the keyword
+        const { keyword } = parsed.data
+        const rows = keyword !== undefined
+            ? await locationModel.searchActiveLocations(keyword)
+            : await locationModel.findActiveLocations()
 
         return res.status(200).json({
             success: true,
             message: rows.length
                 ? 'Locations fetched successfully'
-                : 'No locations available',
+                : keyword !== undefined ? `No locations found for "${keyword}"` : 'No locations available',
             data: convertNulls({
+                keyword: keyword ?? null,
+                total: rows.length,
                 locations: rows.map(formatLocation),
             }),
         })

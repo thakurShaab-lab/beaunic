@@ -1,4 +1,4 @@
-const { eq, and, or, like, asc } = require("drizzle-orm")
+const { eq, and, like, asc, sql } = require("drizzle-orm")
 const db = require("../config/drizzle")
 const { wlLocalities } = require("../schema/wl-localities")
 const { wlCities } = require("../schema/wl-cities")
@@ -21,11 +21,20 @@ const findActiveLocations = async () => activeLocationsQuery()
 
 const escapeLike = (value) => value.replace(/[\\%_]/g, (ch) => `\\${ch}`)
 
-const searchActiveLocations = async (term, limit) => {
-    const text = `%${escapeLike(term)}%`
-
-    return activeLocationsQuery(or(like(wlLocalities.title, text), like(wlCities.title, text))).limit(limit)
-}
+// /location/list search: active locations whose wl_localities.title contains the keyword (any case, as typed, so
+// "%" and "_" match themselves). Titles starting with it come first, then A-Z.
+const searchActiveLocations = async (keyword) =>
+    db
+        .select({
+            locationId: wlLocalities.locationId,
+            locationName: wlLocalities.title,
+            cityId: wlCities.cityId,
+            cityName: wlCities.title,
+        })
+        .from(wlLocalities)
+        .innerJoin(wlCities, eq(wlCities.cityId, wlLocalities.cityId))
+        .where(and(eq(wlLocalities.status, "1"), eq(wlCities.status, "1"), like(wlLocalities.title, `%${escapeLike(keyword)}%`)))
+        .orderBy(sql`${wlLocalities.title} LIKE ${`${escapeLike(keyword)}%`} DESC`, asc(wlLocalities.title), asc(wlCities.title))
 
 const findActiveLocationById = async (locationId) => {
     const rows = await activeLocationsQuery(eq(wlLocalities.locationId, locationId)).limit(1)

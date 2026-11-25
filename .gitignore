@@ -2,7 +2,7 @@
 node_modules/
 
 # Environment variables and secrets
-# .env
+.env
 !.env.example
 
 # Uploaded files (salon logos)
