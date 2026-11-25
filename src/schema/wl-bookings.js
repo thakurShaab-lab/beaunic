@@ -7,7 +7,7 @@ const { wlBookingSlots } = require("./wl-booking-slots");
 const wlBookings = mysqlTable("wl_bookings", {
 	bookingId: int("booking_id").autoincrement().notNull(),
 	customerId: int("customer_id").references(() => wlCustomers.customerId),  // wl_customers, the User (customer_type 2) who booked; NULL = an offline client
-	customerType: varchar("customer_type", { length: 100 }).default('Member'),                    // Member = booked in the app, Offline = made by the partner (wl_offline_bookings)
+	customerType: varchar("customer_type", { length: 100 }).default('Member'),                    // Member = booked in the app, Offline = made by the partner (/booking/offline/*)
 	invoiceNumber: varchar("invoice_number", { length: 30 }),
 	firstName: varchar("first_name", { length: 50 }),
 	lastName: varchar("last_name", { length: 50 }),
@@ -23,19 +23,20 @@ const wlBookings = mysqlTable("wl_bookings", {
 	currencyCode: char("currency_code", { length: 3 }),
 	currencySymbol: char("currency_symbol", { length: 10 }),
 	currencyValue: decimal("currency_value", { precision: 14, scale: 6 }).default('0.000000').notNull(),
-	orderStatus: varchar("order_status", { length: 10 }).default('Placed').notNull(),             // Booked, Completed, Cancelled, No Show
+	orderStatus: varchar("order_status", { length: 10 }).default('Placed').notNull(),             // Booked, Completed, Cancelled, No Show; Draft = an offline booking still being filled in (never shown as a booking)
 	orderReceivedDate: datetime("order_received_date", { mode: 'string'}).default('0000-00-00 00:00:00'),  // When the booking was made
 	paymentMethod: varchar("payment_method", { length: 200 }),
 	paymentStatus: mysqlEnum("payment_status", ['Paid','Unpaid']).default('Unpaid').notNull(),
 	// Booking fields
 	salonId: int("salon_id").notNull().references(() => wlCustomers.customerId),                  // wl_customers, the Salon Partner (customer_type 1) providing the service
-	serviceId: int("service_id").notNull().references(() => wlServices.serviceId),                // wl_services, the booked service
-	slotId: int("slot_id").notNull().references(() => wlBookingSlots.slotId),                     // wl_booking_slots, the booked slot
+	// service_id, slot_id and the slot's date / times: always set on a booking; empty on an offline Draft until chosen
+	serviceId: int("service_id").references(() => wlServices.serviceId),                          // wl_services, the booked service
+	slotId: int("slot_id").references(() => wlBookingSlots.slotId),                               // wl_booking_slots, the booked slot
 	serviceName: varchar("service_name", { length: 255 }),                                        // Service name when booked
 	servicePrice: decimal("service_price", { precision: 10, scale: 2 }).default('0.00').notNull(),// Service price when booked
-	slotDate: date("slot_date", { mode: 'string'}).notNull(),                                     // Slot date when booked
-	startTime: time("start_time").notNull(),                                                      // Slot start time when booked
-	endTime: time("end_time").notNull(),                                                          // Slot end time when booked
+	slotDate: date("slot_date", { mode: 'string'}),                                               // Slot date when booked
+	startTime: time("start_time"),                                                                // Slot start time when booked
+	endTime: time("end_time"),                                                                    // Slot end time when booked
 	bookingNotes: text("booking_notes"),                                                          // Optional note from the customer
 	isCancel: mysqlEnum("is_cancel", ['0','1']).default('0').notNull(),                            // 0=Not Cancelled, 1=Cancelled
 	cancelReasonId: int("cancel_reason_id"),                                                      // wl_cancel_reasons.reason_id picked on Cancel Booking
@@ -74,6 +75,11 @@ const wlBookings = mysqlTable("wl_bookings", {
 	// Status timeline: the booking stays Upcoming (Booked) until the partner marks it Completed or Cancelled
 	bookingCompletedDate: datetime("booking_completed_date", { mode: 'string'}),
 	cancelledBy: mysqlEnum("cancelled_by", ['customer','salon']),                                // Who cancelled: the customer (request approved) or the salon
+	// Commission the Salon Partner pays the admin for this booking (/api/commission/*): the % is set by the admin per
+	// booking (NULL = not set yet); amount = total_amount × commission / 100
+	commission: int("commission"),                                                                // Commission %
+	commissionStatus: mysqlEnum("commission_status", ['unpaid','paid']).default('unpaid').notNull(),  // Paid to the admin yet?
+	commissionPaidDate: datetime("commission_paid_date", { mode: 'string'}),
 },
 (table) => [
 	index("idx_bookings_customer_id").on(table.customerId),
@@ -81,6 +87,7 @@ const wlBookings = mysqlTable("wl_bookings", {
 	index("idx_bookings_salon_id").on(table.salonId),
 	index("idx_bookings_slot_customer").on(table.slotId, table.customerId),
 	index("idx_bookings_salon_requests").on(table.salonId, table.cancelStatus, table.rescheduleStatus),
+	index("idx_bookings_salon_commission").on(table.salonId, table.paymentStatus, table.commissionStatus),
 	uniqueIndex("uq_bookings_payment_transaction_id").on(table.paymentTransactionId),
 	primaryKey({ columns: [table.bookingId], name: "wl_bookings_booking_id"}),
 ]);

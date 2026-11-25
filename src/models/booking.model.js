@@ -3,6 +3,7 @@ const { alias } = require("drizzle-orm/mysql-core")
 const db = require("../config/drizzle")
 const { wlBookingSlots } = require("../schema/wl-booking-slots")
 const { wlBookings } = require("../schema/wl-bookings")
+const { isBooking } = require("./bookingScope")
 const { wlCustomers } = require("../schema/wl-customers")
 const { wlServices } = require("../schema/wl-services")
 const { wlDurations } = require("../schema/wl-durations")
@@ -109,7 +110,7 @@ const findBookingWithDetails = async (bookingId, owner) => {
 const findCustomerBooking = (customerId, bookingId) => findBookingWithDetails(bookingId, eq(wlBookings.customerId, customerId))
 
 // Partner: one of the salon's own bookings
-const findSalonBooking = (salonId, bookingId) => findBookingWithDetails(bookingId, eq(wlBookings.salonId, salonId))
+const findSalonBooking = (salonId, bookingId) => findBookingWithDetails(bookingId, and(eq(wlBookings.salonId, salonId), isBooking))
 
 // Saves the coupon (or its removal) and the amount now payable on the customer's own booking. Only a booking that is
 // still Booked and Unpaid is changed, so a payment made meanwhile is never overwritten. Returns true when saved.
@@ -251,7 +252,7 @@ const respondToRequest = async ({ bookingId, salonId, requestType, action, note,
         const [booking] = await tx
             .select()
             .from(wlBookings)
-            .where(and(eq(wlBookings.bookingId, bookingId), eq(wlBookings.salonId, salonId)))
+            .where(and(eq(wlBookings.bookingId, bookingId), eq(wlBookings.salonId, salonId), isBooking))
             .limit(1)
             .for("update")
         if (!booking) return { error: "not_found" }
@@ -377,7 +378,7 @@ const recordPayment = async ({ bookingId, salonId, paymentMode, paymentMethod, n
         const [booking] = await tx
             .select()
             .from(wlBookings)
-            .where(and(eq(wlBookings.bookingId, bookingId), eq(wlBookings.salonId, salonId)))
+            .where(and(eq(wlBookings.bookingId, bookingId), eq(wlBookings.salonId, salonId), isBooking))
             .limit(1)
             .for("update")
         if (!booking) return { error: "not_found" }
@@ -558,6 +559,7 @@ const salonBookingsCondition = (salonId, { search, date, paymentStatus }) => {
 
     return and(
         eq(wlBookings.salonId, salonId),
+        isBooking,
         searchCondition,
         date ? eq(wlBookings.slotDate, date) : undefined,
         paymentStatus ? eq(wlBookings.paymentStatus, paymentStatus) : undefined
@@ -603,7 +605,7 @@ const lockSalonBooking = async (tx, salonId, bookingId) => {
     const [booking] = await tx
         .select()
         .from(wlBookings)
-        .where(and(eq(wlBookings.bookingId, bookingId), eq(wlBookings.salonId, salonId)))
+        .where(and(eq(wlBookings.bookingId, bookingId), eq(wlBookings.salonId, salonId), isBooking))
         .limit(1)
         .for("update")
 

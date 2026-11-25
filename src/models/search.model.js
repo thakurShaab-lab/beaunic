@@ -7,6 +7,7 @@ const { wlCategories } = require("../schema/wl-categories")
 const { wlPackages } = require("../schema/wl-packages")
 const { wlPackagesMedia } = require("../schema/wl-packages-media")
 const { wlBookings } = require("../schema/wl-bookings")
+const { isBooking } = require("./bookingScope")
 const { serviceRatings, averageRating, reviewCount } = require("./service.model")
 
 // Search (/api/search): partial, case-insensitive matching on the keyword ("hai" finds "Hair & Care").
@@ -168,6 +169,7 @@ const searchSalonBookings = async (salonId, keyword, { limit }) => {
         .where(
             and(
                 eq(wlBookings.salonId, salonId),
+                isBooking,
                 or(
                     digits ? sql`CAST(${wlBookings.bookingId} AS CHAR) LIKE ${`${digits}%`}` : undefined,
                     sql`${bookingCustomerName} LIKE ${pattern}`,

@@ -1,6 +1,7 @@
 const { eq, and, desc, sql } = require("drizzle-orm")
 const db = require("../config/drizzle")
 const { wlBookings } = require("../schema/wl-bookings")
+const { isBooking } = require("./bookingScope")
 const { BOOKING_TABS } = require("./booking.model")
 // Same rules as the Payment Overview on the partner home: paid / cash, and when the money came in
 const { isPaid, isCash, paidOn } = require("./partnerHome.model")
@@ -10,6 +11,7 @@ const { isPaid, isCash, paidOn } = require("./partnerHome.model")
 const paymentsCondition = (salonId, since) =>
     and(
         eq(wlBookings.salonId, salonId),
+        isBooking,
         sql`(${isPaid} OR NOT ${BOOKING_TABS.cancelled()})`,
         since ? sql`${paidOn} >= ${since}` : undefined
     )

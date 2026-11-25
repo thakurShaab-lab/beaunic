@@ -2,6 +2,7 @@ const { eq, and, inArray, desc, count, notInArray } = require("drizzle-orm")
 const db = require("../config/drizzle")
 const { wlDisputes } = require("../schema/wl-disputes")
 const { wlBookings } = require("../schema/wl-bookings")
+const { isBooking } = require("./bookingScope")
 const { wlOrders: wlOrder } = require("../schema/wl-order")
 
 // ---- "Related Booking / Order" options: the partner's own bookings and membership orders, newest first ----
@@ -21,13 +22,13 @@ const BOOKING_FIELDS = {
 // Bookings made at the partner's salon
 const findSalonBookings = async (salonId, limit) =>
     db.select(BOOKING_FIELDS).from(wlBookings)
-        .where(eq(wlBookings.salonId, salonId))
+        .where(and(eq(wlBookings.salonId, salonId), isBooking))
         .orderBy(desc(wlBookings.bookingId))
         .limit(limit)
 
 const findSalonBooking = async (salonId, bookingId) =>
     (await db.select(BOOKING_FIELDS).from(wlBookings)
-        .where(and(eq(wlBookings.bookingId, bookingId), eq(wlBookings.salonId, salonId)))
+        .where(and(eq(wlBookings.bookingId, bookingId), eq(wlBookings.salonId, salonId), isBooking))
         .limit(1))[0] || null
 
 const ORDER_FIELDS = {
@@ -105,7 +106,7 @@ const findRelatedItems = async (salonId, disputes) => {
 
     const [bookings, orders] = await Promise.all([
         bookingIds.length
-            ? db.select(BOOKING_FIELDS).from(wlBookings).where(and(eq(wlBookings.salonId, salonId), inArray(wlBookings.bookingId, bookingIds)))
+            ? db.select(BOOKING_FIELDS).from(wlBookings).where(and(eq(wlBookings.salonId, salonId), isBooking, inArray(wlBookings.bookingId, bookingIds)))
             : [],
         orderIds.length
             ? db.select(ORDER_FIELDS).from(wlOrder).where(and(eq(wlOrder.customers_id, salonId), inArray(wlOrder.order_id, orderIds)))

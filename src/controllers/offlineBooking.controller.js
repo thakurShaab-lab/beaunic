@@ -16,7 +16,8 @@ const { convertNulls } = require('../utils/convertNulls')
 //   Step 2 Service -> /booking/offline/services (list) + /booking/offline/service (save)
 //   Step 3 Booking -> /booking/offline/slots    (date strip + time slots) + /booking/offline/slot (save)
 //   Step 4 Summary -> /booking/offline/details  (order summary) + /booking/offline/confirm ("CREATE ORDER")
-// Until step 4 is confirmed it is a draft in wl_offline_bookings: no wl_bookings row and no place taken in the slot.
+// It is saved in wl_bookings (customer_type 'Offline'). Until step 4 is confirmed it is a Draft (order_status 'Draft'):
+// not shown as a booking anywhere else, and no place taken in the slot. offlineBookingId is its booking_id.
 
 const DEFAULT_PAGE_SIZE = 10
 const MAX_PAGE_SIZE = 50

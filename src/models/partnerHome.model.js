@@ -2,6 +2,7 @@ const { eq, and, asc, desc, sql, count, avg } = require("drizzle-orm")
 const { alias } = require("drizzle-orm/mysql-core")
 const db = require("../config/drizzle")
 const { wlBookings } = require("../schema/wl-bookings")
+const { isBooking } = require("./bookingScope")
 const { wlEnquiries } = require("../schema/wl-enquiries")
 const { wlReviews } = require("../schema/wl-reviews")
 const { wlServices } = require("../schema/wl-services")
@@ -40,7 +41,7 @@ const findBookingStats = async (salonId, { today, nowTime, since }) => {
             cashCount: sumIf(sql`(${recentPaid} AND ${isCash})`),
         })
         .from(wlBookings)
-        .where(eq(wlBookings.salonId, salonId))
+        .where(and(eq(wlBookings.salonId, salonId), isBooking))
 
     return row
 }
@@ -65,7 +66,7 @@ const findTodaySchedule = async (salonId, { today, nowTime, limit }) =>
         .select(bookingCard(today, nowTime))
         .from(wlBookings)
         .leftJoin(wlEmployees, eq(wlEmployees.employeeId, wlBookings.employeeId))
-        .where(and(eq(wlBookings.salonId, salonId), eq(wlBookings.slotDate, today), sql`NOT ${isCancelled}`))
+        .where(and(eq(wlBookings.salonId, salonId), isBooking, eq(wlBookings.slotDate, today), sql`NOT ${isCancelled}`))
         .orderBy(asc(wlBookings.startTime), asc(wlBookings.bookingId))
         .limit(limit)
 
@@ -75,7 +76,7 @@ const findRecentBookings = async (salonId, { today, nowTime, limit }) =>
         .select(bookingCard(today, nowTime))
         .from(wlBookings)
         .leftJoin(wlEmployees, eq(wlEmployees.employeeId, wlBookings.employeeId))
-        .where(eq(wlBookings.salonId, salonId))
+        .where(and(eq(wlBookings.salonId, salonId), isBooking))
         .orderBy(desc(wlBookings.orderReceivedDate), desc(wlBookings.bookingId))
         .limit(limit)
 
