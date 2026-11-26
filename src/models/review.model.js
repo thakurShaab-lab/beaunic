@@ -230,6 +230,25 @@ const findPartnerRatingSummary = async (salonId, filters) => {
     return { averageRating: row && row.averageRating !== null ? Number(row.averageRating) : 0, totalReviews: Number(row ? row.totalReviews : 0) }
 }
 
+// An employee's rating: average stars and number of active reviews of them (review_type employee, review_for_id =
+// the employee) at their salon. averageRating is null when they have no reviews yet.
+const findEmployeeRatingSummary = async (employeeId, salonId) => {
+    const [row] = await db
+        .select({ averageRating: avg(wlReviews.rating), reviewCount: count() })
+        .from(wlReviews)
+        .where(
+            and(
+                eq(wlReviews.reviewType, "employee"),
+                eq(wlReviews.reviewForId, employeeId),
+                eq(wlReviews.salonId, salonId),
+                eq(wlReviews.status, "1")
+            )
+        )
+
+    const reviewCount = Number(row ? row.reviewCount : 0)
+    return { averageRating: reviewCount && row.averageRating !== null ? Number(row.averageRating) : null, reviewCount }
+}
+
 // The partner's services that have reviews, for the service filter, most reviewed first
 const findPartnerReviewedServices = async (salonId, filters) =>
     db
@@ -252,5 +271,6 @@ module.exports = {
     countPartnerReviewsByType,
     countPartnerReviewsByRating,
     findPartnerRatingSummary,
+    findEmployeeRatingSummary,
     findPartnerReviewedServices,
 }

@@ -13,6 +13,7 @@ const { salonNow, timeLabel, dateParts, hhmm, formatSlot } = require('./slot.con
 const { buildSalonLocation, rupees, withImageUrls, durationInfo } = require('./service.controller')
 const { photoUrl: employeePhotoUrl, initialsOf } = require('./employee.controller')
 const employeeModel = require('../models/employee.model')
+const reviewModel = require('../models/review.model')
 const cancelReasonModel = require('../models/cancel-reason.model')
 const slotModel = require('../models/slot.model')
 const { buildInvoicePdf } = require('../utils/invoicePdf')
@@ -1267,6 +1268,24 @@ const assignedEmployeeOf = (booking, imageUrl = null) =>
         }
         : null
 
+// 2600 -> "2.6k", 999 -> "999"
+const shortCount = (value) => (value >= 1000 ? `${Number((value / 1000).toFixed(1))}k` : String(value))
+
+// The assigned employee's rating card: "Employee / Artist · Neha Verma · ★ 4.9 · 2.6k reviews".
+// From their active employee reviews; no reviews yet = no rating (empty) and "0 reviews".
+const employeeRatingOf = (summary) => {
+    const reviewCount = summary ? summary.reviewCount : 0
+    const averageRating = summary && summary.averageRating !== null ? Number(summary.averageRating.toFixed(1)) : null
+    return {
+        averageRating,
+        // "4.9"
+        ratingLabel: averageRating === null ? null : averageRating.toFixed(1),
+        reviewCount,
+        // "2.6k reviews"
+        reviewCountLabel: `${shortCount(reviewCount)} review${reviewCount === 1 ? '' : 's'}`,
+    }
+}
+
 // "Approved by the salon · 07 Oct 2026 · 12:00 AM" / "Cancelled by the salon · …"
 const cancelledSubtitle = (booking) => {
     const when = booking.bookingCancelledDate ? salonDateTimeLabel(booking.bookingCancelledDate) : null
@@ -1818,15 +1837,19 @@ const getBookingDetails = async (req, res) => {
         if (!booking) return res.status(200).json({ success: false, message: 'Booking not found.' })
 
         const tab = tabOf(booking)
-        const [address, covers, employeeImageUrl, invoiceUrl] = await Promise.all([
+        const hasEmployee = Boolean(booking.employeeId && booking.employeeName)
+        const [address, covers, employeeImageUrl, invoiceUrl, employeeRating] = await Promise.all([
             addressModel.findDefaultAddress(booking.salonId),
             coverImages(req, [booking.serviceId]),
             booking.employeeId ? employeePhotoUrl(req, booking.employeeImage) : null,
             // The Invoice row is only shown for cancellations, so the PDF is only made for them
             cancellationOf(booking) ? saveInvoicePdf(buildInvoice(booking), booking.bookingId) : null,
+            // "★ 4.9 · 2.6k reviews" on the assigned employee
+            hasEmployee ? reviewModel.findEmployeeRatingSummary(booking.employeeId, booking.salonId) : null,
         ])
         const basics = bookingBasics(booking, tab)
         const employee = assignedEmployeeOf(booking, employeeImageUrl)
+        if (employee) Object.assign(employee, employeeRatingOf(employeeRating))
         const location = buildSalonLocation(booking.salonId, booking.salonName, address)
         const pricePaise = toPaise(booking.servicePrice)
         const discountPaise = toPaise(booking.couponDiscountAmount || 0)

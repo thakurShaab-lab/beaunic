@@ -9,6 +9,7 @@ const { wlServices } = require("../schema/wl-services")
 const { wlDurations } = require("../schema/wl-durations")
 const { wlEmployees } = require("../schema/wl-employees")
 const { wlWalletTransactions } = require("../schema/wl-wallet-transactions")
+const { wlReviews } = require("../schema/wl-reviews")
 const { createBookingRefund } = require("./refund.model")
 
 // Books one place in a slot, or reports why it can't. One transaction with the slot row locked,
@@ -98,6 +99,7 @@ const findBookingWithDetails = async (bookingId, owner) => {
         .leftJoin(wlServices, eq(wlServices.serviceId, wlBookings.serviceId))
         .leftJoin(wlDurations, eq(wlDurations.durationId, wlServices.serviceDuration))
         .leftJoin(wlEmployees, employeeJoin)
+        .leftJoin(wlReviews, eq(wlReviews.reviewForId, wlBookings.employeeId))
         .where(and(eq(wlBookings.bookingId, bookingId), owner))
         .limit(1)
 
